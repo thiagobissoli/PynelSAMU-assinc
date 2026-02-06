@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ dashboard.nome }} - Sistema SAMU</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: {% if dashboard.cor_tema == 'dark' %}#000000{% else %}#f5f5f7{% endif %};
+            --bg-secondary: {% if dashboard.cor_tema == 'dark' %}#1c1c1e{% else %}#ffffff{% endif %};
+            --bg-card: {% if dashboard.cor_tema == 'dark' %}#2c2c2e{% else %}#ffffff{% endif %};
+            --text-primary: {% if dashboard.cor_tema == 'dark' %}#ffffff{% else %}#000000{% endif %};
+            --text-secondary: {% if dashboard.cor_tema == 'dark' %}#8e8e93{% else %}#6c6c70{% endif %};
+            --border-color: {% if dashboard.cor_tema == 'dark' %}#38383a{% else %}#d1d1d6{% endif %};
+            --green: #34c759;
+            --red: #ff3b30;
+            --blue: #007aff;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 480px;
+            min-width: 480px;
+            max-width: 480px;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .sidebar-header h4 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .sidebar-header p {
+            font-size: 15px;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+        
+        /* Timer badge - mesma linha do título (igual widgets) */
+        .timer-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+        .painel-alertas-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .painel-alertas-header .timer-badge {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .sidebar-title-link {
+            color: inherit;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: opacity 0.15s ease;
+        }
+        .sidebar-title-link:hover {
+            opacity: 0.85;
+            color: inherit;
+        }
+        .indicadores-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding: 10px;
+            min-width: 0;
+            gap: 4px;
+        }
+        
+        /* Indicador Item - preenche altura igualmente, sem scroll (10 itens = 100% da lista) */
+        .indicador-item {
+            display: flex;
+            align-items: stretch;
+            padding: 10px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border: 2px solid transparent;
+            min-width: 0;
+            flex: 1 1 0;
+            min-height: 0;
+        }
+        
+        .indicador-item:hover {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(255,255,255,0.08){% else %}rgba(0,0,0,0.04){% endif %};
+        }
+        
+        .indicador-item.active {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(0,122,255,0.2){% else %}rgba(0,122,255,0.1){% endif %};
+            border-color: var(--blue);
+        }
+        
+        .indicador-info {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 32%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .indicador-nome {
+            font-size: clamp(13px, 1.4vh, 18px);
+            font-weight: 600;
+            line-height: 1.25;
+            white-space: normal;
+            word-break: break-word;
+        }
+        
+        .indicador-desc {
+            font-size: clamp(11px, 1.1vh, 14px);
+            color: var(--text-secondary);
+            white-space: normal;
+            word-break: break-word;
+            margin-top: 2px;
+        }
+        
+        .indicador-mini-chart {
+            flex: 1 1 0;
+            min-width: 140px;
+            margin: 0 8px;
+            min-height: 28px;
+            align-self: stretch;
+            position: relative;
+        }
+        
+        .indicador-valores {
+            flex: 0 0 auto;
+            text-align: right;
+            min-width: 75px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .indicador-valor-principal {
+            font-size: clamp(14px, 1.5vh, 20px);
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .indicador-variacao {
+            font-size: clamp(12px, 1.2vh, 16px);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 2px;
+        }
+        
+        .indicador-variacao i {
+            font-size: clamp(12px, 1.2vh, 16px);
+        }
+        
+        .variacao-positiva {
+            background-color: var(--green);
+            color: white;
+        }
+        
+        .variacao-negativa {
+            background-color: var(--red);
+            color: white;
+        }
+        
+        .variacao-neutra {
+            background-color: var(--text-secondary);
+            color: white;
+        }
+        
+        /* Main Panel */
+        .main-panel {
+            flex: 1;
+            background-color: var(--bg-primary);
+            overflow-y: auto;
+            padding: 30px 40px 30px 10px;
+        }
+        
+        .indicador-detalhe {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .detalhe-header {
+            margin-bottom: 30px;
+        }
+        
+        .detalhe-header h2 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .detalhe-header p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .valor-destaque {
+            margin: 30px 0;
+        }
+        
+        .valor-numero {
+            font-size: 56px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -2px;
+        }
+        
+        .valor-unidade {
+            font-size: 24px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+        
+        .valor-variacao {
+            font-size: 18px;
+            font-weight: 500;
+            margin-top: 10px;
+        }
+        
+        .valor-variacao.positiva {
+            color: var(--green);
+        }
+        
+        .valor-variacao.negativa {
+            color: var(--red);
+        }
+        
+        /* Chart Container */
+        .chart-container {
+            background-color: var(--bg-card);
+            border-radius: 16px;
+            padding: 25px;
+            margin: 25px 0;
+            border: 1px solid var(--border-color);
+        }
+        
+        .chart-wrapper {
+            height: 350px;
+            position: relative;
+        }
+        
+        .chart-time-selector {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .time-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: none;
+            background-color: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        
+        .time-btn:hover {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(255,255,255,0.1){% else %}rgba(0,0,0,0.05){% endif %};
+        }
+        
+        .time-btn.active {
+            background-color: {% if dashboard.cor_tema == 'dark' %}#3a3a3c{% else %}#e5e5ea{% endif %};
+            color: var(--text-primary);
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+        
+        .stat-card {
+            background-color: var(--bg-card);
+            padding: 18px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        
+        .stat-value {
+            font-size: 22px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        /* Sidebar Footer */
+        .sidebar-footer {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .sidebar-footer a {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 16px;
+            padding: 10px;
+            border-radius: 8px;
+            transition: all 0.15s ease;
+        }
+        
+        .sidebar-footer a:hover {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(255,255,255,0.08){% else %}rgba(0,0,0,0.04){% endif %};
+            color: var(--text-primary);
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+        
+        .empty-state i {
+            font-size: 64px;
+            color: var(--border-color);
+            margin-bottom: 20px;
+        }
+        
+        .empty-state p {
+            color: var(--text-secondary);
+        }
+        
+        /* Alert Boxes */
+        .alert-box {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .alert-box.warning {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(255,204,0,0.15){% else %}#fff9e6{% endif %};
+            color: {% if dashboard.cor_tema == 'dark' %}#ffd60a{% else %}#856404{% endif %};
+        }
+        
+        .alert-box.error {
+            background-color: {% if dashboard.cor_tema == 'dark' %}rgba(255,59,48,0.15){% else %}#fef2f2{% endif %};
+            color: {% if dashboard.cor_tema == 'dark' %}#ff6b6b{% else %}#dc2626{% endif %};
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: {% if dashboard.cor_tema == 'dark' %}#4a4a4c{% else %}#c1c1c6{% endif %};
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: {% if dashboard.cor_tema == 'dark' %}#5a5a5c{% else %}#a1a1a6{% endif %};
+        }
+        
+        /* Modal tema dark */
+        #modalAlertaManual .modal-content { background: var(--bg-card) !important; border-color: var(--border-color) !important; }
+        #modalAlertaManual .modal-header { border-color: var(--border-color) !important; }
+        #modalAlertaManual .modal-body { background: var(--bg-secondary) !important; color: var(--text-primary) !important; }
+        #modalAlertaManual .modal-footer { border-color: var(--border-color) !important; }
+        #modalAlertaManual .form-control, #modalAlertaManual .form-select { background: var(--bg-card) !important; color: var(--text-primary) !important; border-color: var(--border-color) !important; }
+        .icone-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-height: 220px; overflow-y: auto; }
+        .icone-opt-modal { min-width: 42px; font-size: 1.2rem; background: var(--bg-card) !important; color: var(--text-primary) !important; border-color: var(--border-color) !important; }
+        .icone-opt-modal:hover { background: var(--blue) !important; color: white !important; border-color: var(--blue) !important; }
+        .icone-opt-modal i { display: block; }
+        .icone-dropdown-menu { min-width: 260px; background: var(--bg-secondary) !important; }
+.cor-swatch { display: inline-block; }
+.cor-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.cor-opt-modal { border-radius: 6px !important; }
+.cor-opt-modal:hover { transform: scale(1.1); box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+.cor-dropdown-menu { min-width: 220px; background: var(--bg-secondary) !important; }
+        
+        /* Painel de alertas embutido (escala via --alerta-scale) */
+        #painelAlertas {
+            --alerta-scale: 1.1;
+            font-size: calc(1rem * var(--alerta-scale));
+        }
+        #painelAlertas h4 {
+            font-size: calc(1.35rem * var(--alerta-scale));
+        }
+        #painelAlertas .list-group-item {
+            color: var(--text-primary);
+            font-size: calc(1rem * var(--alerta-scale));
+            min-height: 56px;
+            padding: 12px 16px;
+        }
+        #painelAlertas .painel-alerta-item h5.alerta-titulo {
+            font-size: calc(1.2rem * var(--alerta-scale));
+            text-transform: uppercase;
+        }
+        #painelAlertas .painel-alerta-item p {
+            font-size: calc(1.1rem * var(--alerta-scale));
+        }
+        #painelAlertas .painel-alerta-item small {
+            font-size: calc(1rem * var(--alerta-scale));
+        }
+        #painelAlertas .painel-alerta-item .bi {
+            font-size: calc(1.4rem * var(--alerta-scale)) !important;
+        }
+        #painelAlertas .painel-alerta-item .alerta-metadata {
+            font-size: calc(0.75rem * var(--alerta-scale));
+            opacity: 0.9;
+        }
+        #painelAlertas .painel-alerta-item .alerta-metadata .bi {
+            font-size: calc(0.75rem * var(--alerta-scale)) !important;
+        }
+        #painelAlertas .painel-alerta-item .alerta-datetime {
+            font-size: calc(0.75rem * var(--alerta-scale));
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h4><a href="{{ url_for('dashboards.index') }}" class="sidebar-title-link"><i class="bi bi-speedometer2"></i> {{ dashboard.nome }}</a></h4>
+            {% if dashboard.descricao %}
+            <p>{{ dashboard.descricao }}</p>
+            {% endif %}
+        </div>
+        
+        <div class="indicadores-list" id="indicadoresList">
+            {% for indicador in indicadores %}
+            {% set tendencia_inversa = indicador.get('tendencia_inversa', false) %}
+            {% set cor_subida = indicador.get('cor_subida') or '#ff3b30' %}
+            {% set cor_descida = indicador.get('cor_descida') or '#34c759' %}
+            {# Cor da tendência: quando tendência é positiva (bom), usar a cor correspondente #}
+            {% set cor_positiva = cor_descida if tendencia_inversa else cor_subida %}
+            {% set cor_negativa = cor_subida if tendencia_inversa else cor_descida %}
+            {% set tendencia = indicador.get('tendencia', 'neutra') %}
+            {% set variacao = indicador.get('variacao_percentual') %}
+            <div class="indicador-item {% if loop.first %}active{% endif %}" 
+                 data-indicador-id="{{ indicador.id }}"
+                 data-cor-subida="{{ cor_subida }}"
+                 data-cor-descida="{{ cor_descida }}"
+                 data-tendencia-inversa="{{ 'true' if tendencia_inversa else 'false' }}"
+                 onclick="selecionarIndicador({{ indicador.id }})">
+                
+                <div class="indicador-info">
+                    <div class="indicador-nome">{{ indicador.nome_completo }}</div>
+                </div>
+                
+                <div class="indicador-mini-chart">
+                    <canvas id="mini_{{ indicador.id }}"></canvas>
+                </div>
+                
+                <div class="indicador-valores">
+                    {% if indicador.get('valor') is not none %}
+                    <div class="indicador-valor-principal">
+                        {{ indicador.get('valor')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}
+                    </div>
+                    {% if variacao is not none %}
+                    <div class="indicador-variacao" 
+                         style="color: {{ cor_positiva if tendencia == 'positiva' else (cor_negativa if tendencia == 'negativa' else 'var(--text-secondary)') }};">
+                        {% if variacao > 0 %}+{% endif %}{{ "%.1f"|format(variacao) }}%
+                        {% if variacao > 0 %}
+                        <i class="bi bi-arrow-up-short"></i>
+                        {% elif variacao < 0 %}
+                        <i class="bi bi-arrow-down-short"></i>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="indicador-variacao" style="color: var(--text-secondary);">
+                        {% if indicador.get('tipo_calculo') != 'diferenca_tempo' %}{{ indicador.get('unidade', '') }}{% endif %}
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <div class="indicador-valor-principal" style="color: var(--text-secondary);">--</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+    </div>
+    
+    <!-- Main Panel -->
+    <div class="main-panel">
+        {% if dashboard.incluir_alertas %}
+        <div id="painelAlertas" class="h-100 d-flex flex-column">
+            <div class="painel-alertas-header mb-4" style="position: relative;">
+                <h4 class="mb-0"><i class="bi bi-bell-fill"></i> Alertas</h4>
+                {% if download_automatico_ativo and download_proxima_execucao_iso %}
+                <span id="timerAtualizacao" class="timer-badge">
+                    <i class="bi bi-clock"></i> Próxima atualização: <strong id="timerContador">--</strong>
+                </span>
+                {% endif %}
+                <div class="d-flex align-items-center gap-2">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary" id="alertaFontMenos" title="Diminuir fonte (A-)">A−</button>
+                        <button type="button" class="btn btn-outline-secondary" id="alertaFontMais" title="Aumentar fonte (A+)">A+</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAlertaManual">
+                        <i class="bi bi-plus-circle"></i> Alerta Manual
+                    </button>
+                    <form method="POST" action="{{ url_for('alertas.gerar') }}" class="d-inline">
+                        <input type="hidden" name="next" value="{{ url_for('dashboards.view', id=dashboard.id) }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-arrow-repeat"></i> Gerar Alertas
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="list-group flex-grow-1 overflow-auto" id="listaAlertas"
+                 data-transparencia="{{ (config_alertas.transparencia_alerta if config_alertas and config_alertas.transparencia_alerta is not none else 20) | transparencia_hex }}"
+                 data-resolver-url="{{ url_for('alertas.resolver', id=0) }}"
+                 data-dashboard-id="{{ dashboard.id }}">
+                {% if alertas %}
+                {% for alerta in alertas %}
+                <div class="list-group-item mb-2 border rounded shadow-sm painel-alerta-item" data-alerta-id="{{ alerta.id }}"
+                     style="background-color: {{ (alerta.cor_tipo or '#ff3b30') + ((config_alertas.transparencia_alerta if config_alertas and config_alertas.transparencia_alerta is not none else 20) | transparencia_hex) }} !important; border-left: 4px solid {{ alerta.cor_tipo or '#ff3b30' }} !important; border-color: var(--border-color) !important;">
+                    <div class="row g-2 align-items-start">
+                        <div class="col-12 col-md-4">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-{{ alerta.icone_tipo or 'exclamation-triangle' }} me-2 flex-shrink-0"
+                                   style="color: {{ alerta.cor_tipo or '#ff3b30' }}; font-size: 1.5rem;"></i>
+                                <div>
+                                    <h5 class="mb-0 fw-bold alerta-titulo">{{ alerta.titulo.split(' - ')[0] if ' - ' in alerta.titulo else alerta.titulo }}</h5>
+                                    <small class="alerta-datetime text-secondary d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-8 d-flex justify-content-between align-items-center">
+                            <div style="font-size: 1rem;">
+                                <p class="mb-1">{{ alerta.mensagem }}</p>
+                                {% if alerta.detalhes %}
+                                {% set detalhes = alerta.detalhes | from_json %}
+                                {% if detalhes.numero_ocorrencia %}
+                                <small class="alerta-metadata text-secondary d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
+                                {% endif %}
+                                {% endif %}
+                            </div>
+                            <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="{{ alerta.id }}">
+                                <input type="hidden" name="next" value="{{ url_for('dashboards.view', id=dashboard.id) }}">
+                                <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="Resolver">
+                                    <span class="fw-bold">{{ 'M' if alerta.nome_tipo == 'Manual' else 'A' }}</span>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="alert alert-secondary" style="background: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary);">
+                    <i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Modal Alerta Manual (tema dark) -->
+        <div class="modal fade" id="modalAlertaManual" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Criar Alerta Manual</h5>
+                        <button type="button" class="btn-close {% if dashboard.cor_tema == 'dark' %}btn-close-white{% endif %}" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                    </div>
+                    <form id="formAlertaManual">
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label for="modal_titulo" class="form-label">Título <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="modal_titulo" name="titulo" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="modal_mensagem" class="form-label">Mensagem <span class="text-danger">*</span></label>
+                                <textarea class="form-control" id="modal_mensagem" name="mensagem" rows="4" required></textarea>
+                            </div>
+                            <div class="row">
+                                <div class="col-6 mb-3">
+                                    <label class="form-label">Ícone</label>
+                                    <div class="dropdown" id="modalIconeDropdown">
+                                        <button type="button" class="btn btn-outline-secondary dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false">
+                                            <i class="bi bi-megaphone" id="modal_iconePreview" style="font-size: 1.3rem;"></i>
+                                        </button>
+                                        <input type="hidden" name="icone" id="modal_icone" value="megaphone">
+                                        <div class="dropdown-menu p-2 icone-dropdown-menu">
+                                            <div class="icone-grid">
+                                                {% for valor, rotulo in icones_manual %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary p-2 icone-opt-modal" data-icon="{{ valor }}" title="{{ rotulo }}">
+                                                    <i class="bi bi-{{ valor }}"></i>
+                                                </button>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <label class="form-label">Cor</label>
+                                    <div class="dropdown" id="modalCorDropdown">
+                                        <button type="button" class="btn btn-outline-secondary dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false">
+                                            <span id="modal_corPreview" class="cor-swatch" style="background: #6c757d; width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border-color);"></span>
+                                        </button>
+                                        <input type="hidden" name="cor" id="modal_cor" value="#6c757d">
+                                        <div class="dropdown-menu p-2 cor-dropdown-menu">
+                                            <div class="cor-grid">
+                                                {% for hex_val, nome in cores_manual %}
+                                                <button type="button" class="btn btn-sm p-2 cor-opt-modal" data-cor="{{ hex_val }}" title="{{ nome }}" style="background: {{ hex_val }}; border: 2px solid rgba(255,255,255,0.3); min-width: 36px; min-height: 36px;"></button>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="modalAlertaErro" class="alert alert-danger d-none"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i> Criar Alerta
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% elif indicadores %}
+        <div id="indicadorDetalhes">
+            {% for indicador in indicadores %}
+            <div class="indicador-detalhe" id="detalhe_{{ indicador.id }}" style="display: {% if loop.first %}block{% else %}none{% endif %};">
+                
+                <div class="detalhe-header d-flex align-items-center flex-wrap gap-2">
+                    <h2 class="mb-0">{{ indicador.nome_completo }}</h2>
+                    {% if download_automatico_ativo and download_proxima_execucao_iso and loop.first %}
+                    <span id="timerAtualizacao" class="timer-badge">
+                        <i class="bi bi-clock"></i> Próxima atualização: <strong id="timerContador">--</strong>
+                    </span>
+                    {% endif %}
+                    {% if indicador.descricao %}
+                    <p>{{ indicador.descricao }}</p>
+                    {% endif %}
+                </div>
+                
+                {# Exibir valor ou "--" se não houver dados #}
+                <div class="valor-destaque">
+                    {% if indicador.get('valor') is not none %}
+                    <span class="valor-numero">
+                        {{ indicador.get('valor')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}
+                    </span>
+                    {% if indicador.get('unidade') and indicador.get('tipo_calculo') != 'diferenca_tempo' %}
+                    <span class="valor-unidade">{{ indicador.get('unidade') }}</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="valor-numero" style="color: var(--text-secondary);">--</span>
+                    {% if indicador.get('unidade') %}
+                    <span class="valor-unidade" style="color: var(--text-secondary);">{{ indicador.get('unidade') }}</span>
+                    {% endif %}
+                    {% endif %}
+                    
+                    {% if indicador.get('minimo') is not none and indicador.get('maximo') is not none %}
+                    <div class="valor-variacao {% if (indicador.get('valor') or 0) >= (indicador.get('media') or indicador.get('valor') or 0) %}positiva{% else %}negativa{% endif %}">
+                        <i class="bi bi-{% if (indicador.get('valor') or 0) >= (indicador.get('media') or indicador.get('valor') or 0) %}arrow-up{% else %}arrow-down{% endif %}"></i>
+                        Min: {{ indicador.get('minimo')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }} | Max: {{ indicador.get('maximo')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}
+                    </div>
+                    {% endif %}
+                </div>
+                
+                {# Sempre exibir gráfico se habilitado #}
+                {% if indicador.grafico_habilitado %}
+                <div class="chart-container">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            <i class="bi bi-graph-up"></i> 
+                            Últimas <strong>{{ indicador.get('grafico_ultimas_horas', 24) }}h</strong>
+                            {% if indicador.get('tipo_calculo') != 'contagem' %}
+                            • Média móvel: <strong>{{ indicador.get('filtro_ultimas_horas', 2) }}h</strong>
+                            {% endif %}
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">
+                            Intervalo: {{ indicador.get('grafico_intervalo_minutos', 60) }} min
+                        </div>
+                    </div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart_{{ indicador.id }}"></canvas>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="stats-grid">
+                    {% if indicador.get('minimo') is not none %}
+                    <div class="stat-card">
+                        <div class="stat-label">Mínimo</div>
+                        <div class="stat-value">{{ indicador.get('minimo')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}</div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if indicador.get('maximo') is not none %}
+                    <div class="stat-card">
+                        <div class="stat-label">Máximo</div>
+                        <div class="stat-value">{{ indicador.get('maximo')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}</div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if indicador.get('mediana') is not none %}
+                    <div class="stat-card">
+                        <div class="stat-label">Mediana</div>
+                        <div class="stat-value">{{ indicador.get('mediana')|formatar_indicador(indicador.get('tipo_calculo', 'diferenca_tempo'), indicador.get('unidade', 'minutos')) }}</div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="stat-card">
+                        <div class="stat-label">Total Registros</div>
+                        <div class="stat-value">{{ indicador.get('total_registros', 0)|int }}</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-label">Filtrados</div>
+                        <div class="stat-value">{{ indicador.get('registros_filtrados', 0)|int }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if not dashboard.incluir_alertas and not indicadores %}
+        <div class="empty-state">
+            <i class="bi bi-inbox"></i>
+            <p>Nenhum indicador configurado neste dashboard</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+const indicadores = {{ indicadores|tojson }};
+let charts = {};
+let miniCharts = {};
+
+// Cores do tema
+const COLORS = {
+    green: '#34c759',
+    red: '#ff3b30',
+    blue: '#007aff',
+    gridColor: '{% if dashboard.cor_tema == "dark" %}rgba(255,255,255,0.1){% else %}rgba(0,0,0,0.1){% endif %}',
+    textColor: '{% if dashboard.cor_tema == "dark" %}#8e8e93{% else %}#6c6c70{% endif %}'
+};
+
+function selecionarIndicador(id) {
+    // Atualizar sidebar
+    document.querySelectorAll('.indicador-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    const item = document.querySelector(`[data-indicador-id="${id}"]`);
+    if (item) item.classList.add('active');
+    
+    // Se painel de alertas está visível, não mostrar detalhes do indicador
+    if (document.getElementById('painelAlertas')) return;
+    
+    // Mostrar detalhes
+    document.querySelectorAll('.indicador-detalhe').forEach(detalhe => {
+        detalhe.style.display = 'none';
+    });
+    const detalhe = document.getElementById(`detalhe_${id}`);
+    if (detalhe) detalhe.style.display = 'block';
+    
+    // Carregar gráfico principal se necessário
+    const indicador = indicadores.find(i => i.id === id);
+    if (indicador && indicador.grafico_habilitado && !charts[id]) {
+        carregarGraficoPrincipal(id);
+    }
+}
+
+
+// Criar mini gráfico estilo app Bolsa (com dados reais da API)
+function criarMiniGrafico(canvasId, indicadorId) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    
+    // Usar a MESMA tendência que a % (backend: valor agora vs 1h atrás), não primeiro/último do gráfico
+    const ind = indicadores.find(i => i.id === indicadorId);
+    const itemElement = document.querySelector(`[data-indicador-id="${indicadorId}"]`);
+    const corSubida = itemElement?.dataset?.corSubida || ind?.cor_subida || COLORS.green;
+    const corDescida = itemElement?.dataset?.corDescida || ind?.cor_descida || COLORS.red;
+    const tendenciaInversa = itemElement?.dataset?.tendenciaInversa === 'true' || ind?.tendencia_inversa;
+    const corPositiva = tendenciaInversa ? corDescida : corSubida;
+    const corNegativa = tendenciaInversa ? corSubida : corDescida;
+    const tendencia = (ind && ind.tendencia) ? ind.tendencia : 'neutra';
+    
+    // Buscar dados reais da API
+    fetch(`/indicadores/grafico/${indicadorId}`)
+        .then(response => response.json())
+        .then(data => {
+            const dados = Array.isArray(data) ? data : (data?.atual || []);
+            if (!data || dados.length === 0 || data.erro) {
+                // Sem dados - deixar canvas vazio
+                return;
+            }
+            
+            const valores = dados.map(d => d.valor).filter(v => v !== null);
+            if (valores.length === 0) return;
+            
+            const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+            const corHex = cor.startsWith('#') ? cor : '#' + cor;
+            const corArea = corHex + '{{ (dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20) | transparencia_hex }}';
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: valores.map((_, i) => i),
+                    datasets: [{
+                        data: valores,
+                        borderColor: cor,
+                        backgroundColor: corArea,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: {
+                            display: false,
+                            beginAtZero: true
+                        }
+                    },
+                    animation: {
+                        duration: 500
+                    }
+                }
+            });
+        })
+        .catch(error => {
+            console.log('Mini gráfico não disponível para', indicadorId);
+        });
+}
+
+// Carregar gráfico principal (usa configuração do indicador)
+function carregarGraficoPrincipal(id) {
+    fetch(`/indicadores/grafico/${id}`)
+        .then(response => response.json())
+        .then(data => {
+            renderizarGraficoPrincipal(id, data);
+        })
+        .catch(error => {
+            console.error('Erro ao carregar gráfico:', error);
+            // Renderizar com dados vazios
+            renderizarGraficoPrincipal(id, []);
+        });
+}
+
+function renderizarGraficoPrincipal(id, data) {
+    const ctx = document.getElementById(`chart_${id}`);
+    if (!ctx) return;
+    
+    // Destruir gráfico existente
+    if (charts[id]) {
+        charts[id].destroy();
+    }
+    
+    const indicador = indicadores.find(i => i.id === id);
+    
+    // Usar a MESMA tendência que a % (backend: valor agora vs 1h atrás), não primeiro/último do gráfico
+    const itemElement = document.querySelector(`[data-indicador-id="${id}"]`);
+    const corSubida = itemElement?.dataset?.corSubida || indicador?.cor_subida || COLORS.green;
+    const corDescida = itemElement?.dataset?.corDescida || indicador?.cor_descida || COLORS.red;
+    const tendenciaInversa = itemElement?.dataset?.tendenciaInversa === 'true' || indicador?.tendencia_inversa;
+    const corPositiva = tendenciaInversa ? corDescida : corSubida;
+    const corNegativa = tendenciaInversa ? corSubida : corDescida;
+    const tendencia = (indicador && indicador.tendencia) ? indicador.tendencia : 'neutra';
+    
+    // Usar apenas dados reais - não simular (suporta formato {atual, historico, historico_cor})
+    const dados = Array.isArray(data) ? data : (data?.atual || []);
+    if (!data || dados.length === 0) {
+        console.log('Sem dados para o gráfico do indicador', id);
+        return;
+    }
+    
+    const labels = dados.map(d => d.display_label || d.label);
+    const valores = dados.map(d => d.valor);
+    const registros = dados.map(d => d.registros_janela || 0);
+    
+    // Cor da linha = mesma cor da % de tendência (usa tendência do backend, não do gráfico)
+    const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+    
+    // Área sob a linha: opacidade configurável no dashboard
+    const corHex = cor.startsWith('#') ? cor : '#' + cor;
+    const corArea20 = corHex + '{{ (dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20) | transparencia_hex }}';
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 350);
+    gradient.addColorStop(0, corArea20);
+    gradient.addColorStop(1, corArea20);
+    
+    const datasets = [{
+        data: valores,
+        borderColor: cor,
+        backgroundColor: gradient,
+        borderWidth: 2.5,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 6,
+        pointHoverBackgroundColor: cor,
+        pointHoverBorderColor: '#fff',
+        pointHoverBorderWidth: 2
+    }];
+    if (data.historico && data.historico.length === dados.length) {
+        datasets.push({
+            label: 'Histórico',
+            data: data.historico,
+            borderColor: data.historico_cor || '#6c757d',
+            borderDash: [5, 5],
+            fill: false,
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+    }
+    if (data.meta && data.meta.length === dados.length) {
+        var dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
+        datasets.push({
+            label: 'Meta',
+            data: data.meta,
+            borderColor: data.meta_cor || '#ffc107',
+            borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
+            fill: false,
+            tension: 0,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+    }
+    charts[id] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '{% if dashboard.cor_tema == "dark" %}rgba(60,60,60,0.95){% else %}rgba(255,255,255,0.95){% endif %}',
+                    titleColor: '{% if dashboard.cor_tema == "dark" %}#fff{% else %}#000{% endif %}',
+                    bodyColor: '{% if dashboard.cor_tema == "dark" %}#fff{% else %}#000{% endif %}',
+                    borderColor: COLORS.gridColor,
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: false,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 15, weight: '700' },
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.raw;
+                            const unidade = indicador?.unidade || '';
+                            const numRegistros = registros[context.dataIndex] || 0;
+                            const prefix = context.dataset.label || 'Valor';
+                            const isLinhaPrincipal = context.datasetIndex === 0;
+                            if (value != null) {
+                                const u = (unidade || '').toLowerCase();
+                                const fmt = (u === 'ocorrências' || u === 'regulações' || u === 'empenhos') ? Math.round(value) : value.toFixed(2);
+                                const lines = [`${prefix}: ${fmt} ${unidade}`.trim()];
+                                if (isLinhaPrincipal) lines.push(`Registros: ${numRegistros}`);
+                                return lines;
+                            }
+                            return 'Sem dados';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        color: COLORS.gridColor,
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: COLORS.textColor,
+                        font: { size: 11 },
+                        maxRotation: 0,
+                        maxTicksLimit: 8
+                    }
+                },
+                y: {
+                    grid: {
+                        color: COLORS.gridColor,
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: COLORS.textColor,
+                        font: { size: 11 },
+                        padding: 10
+                    },
+                    beginAtZero: false
+                }
+            },
+            animation: {
+                duration: 750,
+                easing: 'easeOutQuart'
+            }
+        }
+    });
+}
+
+
+// Painel Alertas - tamanho da fonte (persiste em localStorage)
+(function() {
+    var STORAGE_KEY = 'alertaFontScale';
+    var SCALES = [0.85, 0.95, 1.05, 1.15, 1.25];
+    var DEFAULT_IDX = 2;
+    var painel = document.getElementById('painelAlertas');
+    if (!painel) return;
+    var idx = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+    if (isNaN(idx) || idx < 0 || idx >= SCALES.length) idx = DEFAULT_IDX;
+    function applyScale() {
+        painel.style.setProperty('--alerta-scale', SCALES[idx]);
+    }
+    applyScale();
+    document.getElementById('alertaFontMenos')?.addEventListener('click', function() {
+        if (idx > 0) { idx--; localStorage.setItem(STORAGE_KEY, idx); applyScale(); }
+    });
+    document.getElementById('alertaFontMais')?.addEventListener('click', function() {
+        if (idx < SCALES.length - 1) { idx++; localStorage.setItem(STORAGE_KEY, idx); applyScale(); }
+    });
+})();
+
+// Modal Alerta Manual - seletor de cores
+document.querySelectorAll('.cor-opt-modal').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        var cor = this.dataset.cor;
+        var dropdown = document.getElementById('modalCorDropdown');
+        if (dropdown) {
+            dropdown.querySelector('#modal_cor').value = cor;
+            dropdown.querySelector('#modal_corPreview').style.background = cor;
+            bootstrap.Dropdown.getInstance(dropdown.querySelector('[data-bs-toggle="dropdown"]'))?.hide();
+        }
+    });
+});
+
+// Modal Alerta Manual - seletor de ícones
+document.querySelectorAll('.icone-opt-modal').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        var icon = this.dataset.icon;
+        var dropdown = document.getElementById('modalIconeDropdown');
+        if (dropdown) {
+            dropdown.querySelector('#modal_icone').value = icon;
+            dropdown.querySelector('#modal_iconePreview').className = 'bi bi-' + icon;
+            bootstrap.Dropdown.getInstance(dropdown.querySelector('[data-bs-toggle="dropdown"]'))?.hide();
+        }
+    });
+});
+
+// Resolver alerta via AJAX (evita reload da página e recálculo de indicadores)
+document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form && form.classList && form.classList.contains('form-resolver-alerta')) {
+        e.preventDefault();
+        var alertaId = form.getAttribute('data-alerta-id');
+        var btn = form.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = true;
+        var fd = new FormData(form);
+        fd.append('X-Requested-With', 'XMLHttpRequest');
+        fetch(form.action, {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }).catch(function() { return { ok: false, json: {} }; }); })
+        .then(function(res) {
+            if (res.ok && res.json && res.json.success) {
+                var item = document.querySelector('.painel-alerta-item[data-alerta-id="' + alertaId + '"]');
+                if (item) {
+                    item.style.transition = 'opacity 0.3s';
+                    item.style.opacity = '0';
+                    setTimeout(function() {
+                        item.remove();
+                        var list = document.querySelector('#painelAlertas .list-group');
+                        if (list && list.querySelectorAll('.painel-alerta-item').length === 0) {
+                            var empty = document.createElement('div');
+                            empty.className = 'alert alert-secondary';
+                            empty.style.cssText = 'background: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary);';
+                            empty.innerHTML = '<i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.';
+                            list.appendChild(empty);
+                        }
+                    }, 300);
+                }
+            }
+        })
+        .catch(function() {})
+        .finally(function() { if (btn) btn.disabled = false; });
+    }
+});
+
+// Modal Alerta Manual (AJAX) - insere alerta sem recarregar a página
+var formAlerta = document.getElementById('formAlertaManual');
+if (formAlerta) {
+    formAlerta.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var btn = formAlerta.querySelector('button[type="submit"]');
+        var erroEl = document.getElementById('modalAlertaErro');
+        erroEl.classList.add('d-none');
+        btn.disabled = true;
+        var fd = new FormData(formAlerta);
+        fd.append('next', '{{ url_for("dashboards.view", id=dashboard.id) }}');
+        fetch('{{ url_for("alertas.manual_create") }}', {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(function(r) {
+            return r.json().then(function(j) { return { ok: r.ok, json: j }; }).catch(function() { return { ok: false, json: { error: 'Erro no servidor.' } }; });
+        })
+        .then(function(res) {
+            if (res.ok && res.json && res.json.success) {
+                bootstrap.Modal.getInstance(document.getElementById('modalAlertaManual')).hide();
+                formAlerta.reset();
+                var mi = document.getElementById('modal_icone');
+                var mp = document.getElementById('modal_iconePreview');
+                var mc = document.getElementById('modal_cor');
+                var mcp = document.getElementById('modal_corPreview');
+                if (mi) mi.value = 'megaphone';
+                if (mp) mp.className = 'bi bi-megaphone';
+                if (mc) mc.value = '#6c757d';
+                if (mcp) mcp.style.background = '#6c757d';
+                var a = res.json.alerta;
+                if (a) {
+                    var list = document.getElementById('listaAlertas');
+                    var vazio = list.querySelector('.alert-secondary');
+                    if (vazio) vazio.remove();
+                    var transp = list.getAttribute('data-transparencia') || '33';
+                    var resolverBase = list.getAttribute('data-resolver-url') || '';
+                    var resolverUrl = resolverBase.replace(/\/[^/]*$/, '/' + a.id);
+                    var cor = a.tipo_alerta_cor || '#6c757d';
+                    var bg = cor + transp;
+                    var tituloExib = (a.titulo || '').indexOf(' - ') >= 0 ? (a.titulo || '').split(' - ')[0] : (a.titulo || '');
+                    var html = '<div class="list-group-item mb-2 border rounded shadow-sm painel-alerta-item" data-alerta-id="' + a.id + '" style="background-color:' + bg + ' !important; border-left: 4px solid ' + cor + ' !important; border-color: var(--border-color) !important;">' +
+                        '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
+                        '<i class="bi bi-' + (a.tipo_alerta_icone || 'megaphone') + ' me-2 flex-shrink-0" style="color:' + cor + '; font-size: 1.5rem;"></i>' +
+                        '<div><h5 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h5>' +
+                        '<small class="alerta-datetime text-secondary d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                        '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center"><div style="font-size: 1rem;">' +
+                        '<p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
+                        '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '">' +
+                        '<input type="hidden" name="next" value="{{ url_for("dashboards.view", id=dashboard.id) }}">' +
+                        '<button type="submit" class="btn btn-sm rounded-circle btn-success" title="Resolver"><span class="fw-bold">M</span></button></form></div></div></div>';
+                    var div = document.createElement('div');
+                    div.innerHTML = html.trim();
+                    list.insertBefore(div.firstChild, list.firstChild);
+                }
+            } else {
+                erroEl.textContent = res.json.error || 'Erro ao criar alerta.';
+                erroEl.classList.remove('d-none');
+            }
+        })
+        .catch(function(err) {
+            erroEl.textContent = 'Erro ao criar alerta.';
+            erroEl.classList.remove('d-none');
+        })
+        .finally(function() { btn.disabled = false; });
+    });
+}
+
+// Inicialização
+document.addEventListener('DOMContentLoaded', function() {
+    {% if download_automatico_ativo and download_proxima_execucao_iso %}
+    var proximaIso = {{ download_proxima_execucao_iso | tojson }};
+    var downloadModificadoInicial = {{ (download_arquivo_modificado or '') | tojson }};
+    var ultimoStatus = null;
+    var pollIntervalMs = 30000;
+    var pollIntervalZeroMs = 15000;
+    var timerZero = false;
+    var pollTimer = null;
+    function textoStatus() {
+        if (ultimoStatus === 'executando') return 'Executando download...';
+        if (ultimoStatus === 'sucesso') return 'Download concluído';
+        if (ultimoStatus === 'erro') return 'Erro no download';
+        return 'Aguardando...';
+    }
+    function atualizarTimer() {
+        var el = document.getElementById('timerContador');
+        if (!el) return;
+        if (!proximaIso) return;
+        var proximaMs = new Date(proximaIso).getTime();
+        var diffMs = proximaMs - Date.now();
+        if (diffMs <= 0) {
+            timerZero = true;
+            el.textContent = textoStatus();
+            return;
+        }
+        timerZero = false;
+        var totalSec = Math.floor(diffMs / 1000);
+        var min = Math.floor(totalSec / 60);
+        var sec = totalSec % 60;
+        el.textContent = min + ' min ' + (sec < 10 ? '0' : '') + sec + ' s';
+    }
+    function pollStatus() {
+        fetch('{{ url_for("download.api_status") }}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                ultimoStatus = data.ultimo_status || null;
+                var atual = data.arquivo_modificado || '';
+                if (atual && atual !== downloadModificadoInicial) {
+                    downloadModificadoInicial = atual;
+                    window.location.reload();
+                    return;
+                }
+                if (data.proxima_execucao_iso) {
+                    var novaProxima = data.proxima_execucao_iso;
+                    if (novaProxima !== proximaIso) {
+                        proximaIso = novaProxima;
+                        atualizarTimer();
+                    }
+                }
+                if (timerZero) atualizarTimer();
+            })
+            .catch(function() {});
+    }
+    setInterval(atualizarTimer, 1000);
+    atualizarTimer();
+    function agendarPoll() {
+        var intervalo = timerZero ? pollIntervalZeroMs : pollIntervalMs;
+        pollTimer = setTimeout(function() {
+            pollStatus();
+            agendarPoll();
+        }, intervalo);
+    }
+    pollStatus();
+    agendarPoll();
+    {% else %}
+    var downloadModificadoInicial = {{ (download_arquivo_modificado or '') | tojson }};
+    {% endif %}
+    // Criar mini gráficos para cada indicador (com dados reais)
+    indicadores.forEach(indicador => {
+        if (indicador.grafico_habilitado) {
+            criarMiniGrafico(`mini_${indicador.id}`, indicador.id);
+        }
+    });
+    
+    // Carregar gráfico do primeiro indicador
+    if (indicadores.length > 0) {
+        const primeiro = indicadores[0];
+        if (primeiro.grafico_habilitado) {
+            setTimeout(() => {
+                carregarGraficoPrincipal(primeiro.id);
+            }, 100);
+        }
+    }
+    
+    {% if not download_automatico_ativo or not download_proxima_execucao_iso %}
+    var intervaloMin = {{ download_intervalo_minutos | default(60) }};
+    var intervaloMs = Math.max(60000, intervaloMin * 60 * 1000);
+    setInterval(function() {
+        fetch('{{ url_for("download.api_status") }}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var atual = data.arquivo_modificado || '';
+                if (atual && atual !== downloadModificadoInicial) {
+                    downloadModificadoInicial = atual;
+                    window.location.reload();
+                }
+            })
+            .catch(function() {});
+    }, intervaloMs);
+    {% endif %}
+});
+</script>
+</body>
+</html>

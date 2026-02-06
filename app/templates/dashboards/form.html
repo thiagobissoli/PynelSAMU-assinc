@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}{% if modo == 'create' %}Criar{% else %}Editar{% endif %} Dashboard - Sistema SAMU{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <i class="bi bi-{% if modo == 'create' %}plus-circle{% else %}pencil{% endif %}"></i> 
+        {% if modo == 'create' %}Criar{% else %}Editar{% endif %} Dashboard
+    </h1>
+    <a href="{{ url_for('dashboards.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <form method="POST">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Informações Básicas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="nome" class="form-label">Nome do Dashboard <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="nome" name="nome" 
+                               value="{{ dashboard.nome if dashboard else '' }}" required>
+                        <small class="form-text text-muted">Ex: Dashboard Operacional, Dashboard Gerencial</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="descricao" name="descricao" rows="2">{{ dashboard.descricao if dashboard else '' }}</textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="cor_tema" class="form-label">Tema</label>
+                            <select class="form-select" id="cor_tema" name="cor_tema">
+                                <option value="dark" {% if dashboard and dashboard.cor_tema == 'dark' or not dashboard %}selected{% endif %}>Escuro</option>
+                                <option value="light" {% if dashboard and dashboard.cor_tema == 'light' %}selected{% endif %}>Claro</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="ordem" class="form-label">Ordem de Exibição</label>
+                            <input type="number" class="form-control" id="ordem" name="ordem" 
+                                   value="{{ dashboard.ordem if dashboard else 0 }}" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ativo" name="ativo" 
+                                   {% if not dashboard or dashboard.ativo %}checked{% endif %}>
+                            <label class="form-check-label" for="ativo">
+                                Dashboard Ativo
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Configuração de Widgets -->
+            {% if dashboard %}
+            <div class="card mt-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-grid-3x3-gap"></i> Configuração de Widgets</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="widgets_grid_template" class="form-label">Template de Grid</label>
+                            <select class="form-select" id="widgets_grid_template" name="widgets_grid_template">
+                                <option value="auto" {% if dashboard.widgets_grid_template == 'auto' %}selected{% endif %}>Automático (responsivo)</option>
+                                <option value="2col" {% if dashboard.widgets_grid_template == '2col' %}selected{% endif %}>2 Colunas</option>
+                                <option value="3col" {% if dashboard.widgets_grid_template == '3col' %}selected{% endif %}>3 Colunas</option>
+                                <option value="4col" {% if dashboard.widgets_grid_template == '4col' %}selected{% endif %}>4 Colunas</option>
+                                <option value="masonry" {% if dashboard.widgets_grid_template == 'masonry' %}selected{% endif %}>Masonry (Pinterest)</option>
+                            </select>
+                            <small class="form-text text-muted">Layout do grid de widgets</small>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="widgets_colunas" class="form-label">Número de Colunas</label>
+                            <input type="number" class="form-control" id="widgets_colunas" name="widgets_colunas" 
+                                   value="{{ dashboard.widgets_colunas if dashboard else 3 }}" min="1" max="6">
+                            <small class="form-text text-muted">Número de colunas no grid (1-6)</small>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="widgets_linhas" class="form-label">Número de Linhas (Opcional)</label>
+                            <input type="number" class="form-control" id="widgets_linhas" name="widgets_linhas" 
+                                   value="{{ dashboard.widgets_linhas if dashboard and dashboard.widgets_linhas else '' }}" 
+                                   min="1" max="20" placeholder="Ilimitado">
+                            <small class="form-text text-muted">Deixe vazio para ilimitado. Limita o número de linhas visíveis no grid.</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="opacidade_area_grafico" class="form-label">Opacidade da área dos gráficos (%)</label>
+                            <input type="number" class="form-control" id="opacidade_area_grafico" name="opacidade_area_grafico" 
+                                   value="{{ dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20 }}" 
+                                   min="0" max="100">
+                            <small class="form-text text-muted">0 = transparente, 100 = opaco. Aplica à visão lista e widgets.</small>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="incluir_alertas" name="incluir_alertas" 
+                                   {% if dashboard and dashboard.incluir_alertas %}checked{% endif %}>
+                            <label class="form-check-label" for="incluir_alertas">
+                                <strong>Incluir dashboard de alertas na visualização lista</strong>
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">Na visão lista: lado esquerdo = indicadores, lado direito = alertas (sem gráfico grande).</small>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Dica:</strong> Após salvar, você pode configurar tamanhos e posições individuais de cada widget 
+                        {% if dashboard %}
+                        <a href="{{ url_for('dashboards.widgets_config', id=dashboard.id) }}" class="alert-link">aqui</a>.
+                        {% else %}
+                        na página de edição.
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Seleção de Indicadores -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-list-check"></i> Indicadores do Dashboard
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if indicadores %}
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="searchIndicadores" 
+                               placeholder="Buscar indicadores..." 
+                               onkeyup="filtrarIndicadores()">
+                    </div>
+                    
+                    <div id="indicadoresList" style="max-height: 400px; overflow-y: auto;">
+                        {% for indicador in indicadores %}
+                        <div class="form-check mb-2 indicador-item">
+                            <input class="form-check-input" type="checkbox" 
+                                   name="indicadores" 
+                                   value="{{ indicador.id }}" 
+                                   id="indicador_{{ indicador.id }}"
+                                   {% if dashboard and indicador in dashboard.indicadores %}checked{% endif %}>
+                            <label class="form-check-label" for="indicador_{{ indicador.id }}">
+                                <strong>{{ indicador.nome }}</strong>
+                                {% if indicador.descricao %}
+                                <br><small class="text-muted">{{ indicador.descricao }}</small>
+                                {% endif %}
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="selecionarTodos()">
+                            Selecionar Todos
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="desmarcarTodos()">
+                            Desmarcar Todos
+                        </button>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> 
+                        Nenhum indicador disponível. 
+                        <a href="{{ url_for('indicadores.create') }}">Criar indicadores</a> primeiro.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-circle"></i> Salvar Dashboard
+                </button>
+                <a href="{{ url_for('dashboards.index') }}" class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Cancelar
+                </a>
+            </div>
+        </form>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="bi bi-question-circle"></i> Ajuda</h5>
+            </div>
+            <div class="card-body">
+                <h6>O que é um Dashboard?</h6>
+                <p class="small">
+                    Um dashboard é uma página configurável que exibe múltiplos indicadores 
+                    em uma interface similar ao app "Bolsa" do Mac/iPhone.
+                </p>
+                
+                <h6 class="mt-3">Características:</h6>
+                <ul class="small">
+                    <li>Sidebar com lista de indicadores</li>
+                    <li>Painel principal com detalhes do indicador selecionado</li>
+                    <li>Gráficos interativos</li>
+                    <li>Tema escuro ou claro</li>
+                    <li>Busca de indicadores</li>
+                </ul>
+                
+                <h6 class="mt-3">Como usar:</h6>
+                <ol class="small">
+                    <li>Crie indicadores primeiro</li>
+                    <li>Crie um dashboard</li>
+                    <li>Selecione os indicadores desejados</li>
+                    <li>Visualize o dashboard</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function filtrarIndicadores() {
+    const termo = document.getElementById('searchIndicadores').value.toLowerCase();
+    document.querySelectorAll('.indicador-item').forEach(item => {
+        const texto = item.textContent.toLowerCase();
+        item.style.display = texto.includes(termo) ? 'block' : 'none';
+    });
+}
+
+function selecionarTodos() {
+    document.querySelectorAll('#indicadoresList input[type="checkbox"]').forEach(cb => {
+        cb.checked = true;
+    });
+}
+
+function desmarcarTodos() {
+    document.querySelectorAll('#indicadoresList input[type="checkbox"]').forEach(cb => {
+        cb.checked = false;
+    });
+}
+</script>
+{% endblock %}

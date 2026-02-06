@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}Configuração de Alertas{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-gear"></i> Configuração de Alertas</h1>
+    <div>
+        <a href="{{ url_for('alertas.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Novo Alerta
+        </a>
+        <a href="{{ url_for('alertas.dashboard') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center py-2"
+         role="button" data-bs-toggle="collapse" data-bs-target="#configCollapse" aria-expanded="true" aria-controls="configCollapse">
+        <h5 class="mb-0"><i class="bi bi-gear"></i> Configurações</h5>
+        <i class="bi bi-chevron-down config-chevron"></i>
+    </div>
+    <div class="collapse show" id="configCollapse">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('alertas.config') }}">
+                <div class="row g-0">
+                    <div class="col-md-6 pe-md-4">
+                        <label class="form-label fw-semibold"><i class="bi bi-clock"></i> Alertas automáticos</label>
+                        <p class="text-muted small mb-2">Alertas que <strong>não</strong> têm "Sumir automaticamente quando resolvido" serão resolvidos após o tempo definido.</p>
+                        <div class="d-flex align-items-end gap-2 mb-2">
+                            <div>
+                                <label for="resolver_apos_minutos" class="form-label small mb-0">Resolver após (min)</label>
+                                <input type="number" class="form-control form-control-sm" id="resolver_apos_minutos" name="resolver_apos_minutos"
+                                       value="{{ config_sistema.resolver_apos_minutos if config_sistema else 45 }}" min="1" max="1440" style="width: 80px;">
+                            </div>
+                        </div>
+                        <hr class="my-2 text-secondary">
+                        <div>
+                            <label for="transparencia_alerta" class="form-label small mb-0"><i class="bi bi-palette"></i> Transparência do fundo (%)</label>
+                            <input type="number" class="form-control form-control-sm" id="transparencia_alerta" name="transparencia_alerta"
+                                   value="{{ config_sistema.transparencia_alerta if config_sistema and config_sistema.transparencia_alerta is not none else 20 }}" min="0" max="100" style="width: 80px;">
+                            <small class="text-muted">0 = transparente, 100 = opaco</small>
+                        </div>
+                    </div>
+                    <div class="col-12 d-md-none my-3"><hr class="my-0 text-secondary"></div>
+                    <div class="col-md-6 ps-md-4 config-col-som">
+                        <label class="form-label fw-semibold"><i class="bi bi-volume-up"></i> Som ao receber novo alerta</label>
+                        <div class="list-group list-group-flush">
+                            {% for valor, label in sons_disponiveis %}
+                            <div class="list-group-item d-flex align-items-center px-0 py-2 border-0">
+                                <input class="form-check-input me-2" type="radio" name="som_alerta" id="som_{{ valor }}" value="{{ valor }}"
+                                       {% if not config_sistema or (config_sistema.som_alerta or 'beep') == valor %}checked{% endif %}>
+                                <label class="form-check-label flex-grow-1 mb-0 small" for="som_{{ valor }}">{{ label }}</label>
+                                {% if valor != 'none' %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-0" data-som="{{ valor }}" title="Testar som">
+                                    <i class="bi bi-play-fill"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <hr class="my-3 text-secondary">
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-check-circle"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<style>
+.config-chevron { transition: transform 0.2s; }
+.card-header.collapsed .config-chevron { transform: rotate(-90deg); }
+@media (min-width: 768px) {
+    .config-col-som { border-left: 1px solid #6c757d; }
+}
+</style>
+<script>
+(function() {
+    var collapse = document.getElementById('configCollapse');
+    var header = collapse.closest('.card').querySelector('.card-header');
+    collapse.addEventListener('show.bs.collapse', function() { header.classList.remove('collapsed'); });
+    collapse.addEventListener('hide.bs.collapse', function() { header.classList.add('collapsed'); });
+})();
+</script>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-sliders"></i> Configurações de Alerta</h5>
+    </div>
+    <div class="card-body">
+        {% if configuracoes %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Tipo de Alerta</th>
+                        <th>Ativo</th>
+                        <th>Sumir automaticamente quando resolvido</th>
+                        <th>Forma de Contabilizar</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for config in configuracoes %}
+                    <tr>
+                        <td>
+                            <strong>
+                                <i class="bi bi-{{ config.icone or 'exclamation-triangle' }}" style="color: {{ config.cor }};"></i>
+                                {{ config.tipo }}
+                            </strong>
+                        </td>
+                        <td>
+                            {% if config.ativo %}
+                                <span class="badge bg-success">Ativo</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inativo</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if config.sumir_quando_resolvido %}
+                                <span class="badge bg-info">Sim</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Não</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set contagem = config.get_configuracoes_dict().get('contagem_por', 'linhas') %}
+                            {% if contagem == 'ocorrencia' %}
+                                Por ocorrência
+                            {% else %}
+                                Todas as linhas
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('alertas.edit', id=config.id) }}" class="btn btn-sm btn-primary" title="Editar">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="POST" action="{{ url_for('alertas.duplicate', id=config.id) }}" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Duplicar">
+                                    <i class="bi bi-copy"></i>
+                                </button>
+                            </form>
+                            <form method="POST" action="{{ url_for('alertas.delete', id=config.id) }}" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-danger" title="Excluir"
+                                        onclick="return confirm('Tem certeza que deseja remover esta configuração?')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> Nenhuma configuração de alerta. <a href="{{ url_for('alertas.create') }}">Criar a primeira</a>.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+(function() {
+    function playSom(id) {
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            var ctx = new Ctx();
+            function beep(freq, start, dur) {
+                var o = ctx.createOscillator();
+                var g = ctx.createGain();
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.frequency.value = freq;
+                o.type = 'sine';
+                g.gain.value = 0.25;
+                o.start(ctx.currentTime + start);
+                o.stop(ctx.currentTime + start + dur);
+            }
+            if (id === 'beep') {
+                beep(800, 0, 0.25);
+            } else if (id === 'beep2') {
+                beep(800, 0, 0.15);
+                beep(800, 0.25, 0.15);
+            } else if (id === 'alert') {
+                beep(1000, 0, 0.4);
+            } else if (id === 'notification') {
+                beep(660, 0, 0.1);
+                beep(880, 0.15, 0.1);
+                beep(1100, 0.3, 0.15);
+            } else if (id === 'urgente') {
+                beep(600, 0, 0.1);
+                beep(800, 0.12, 0.1);
+                beep(1000, 0.24, 0.1);
+                beep(800, 0.36, 0.15);
+            }
+        } catch (e) {}
+    }
+    document.querySelectorAll('[data-som]').forEach(function(btn) {
+        btn.addEventListener('click', function() { playSom(this.getAttribute('data-som')); });
+    });
+})();
+</script>
+{% endblock %}

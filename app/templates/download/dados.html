@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Visualizar Dados - Sistema Flask{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-table"></i> Dados</h1>
+    <div>
+        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+        <a href="{{ url_for('download.ver_indicadores') }}" class="btn btn-info">
+            <i class="bi bi-graph-up"></i> Indicadores
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">
+            <i class="bi bi-database"></i> Dados ({{ total_linhas }} registros)
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-sm">
+                <thead class="table-dark">
+                    <tr>
+                        {% for coluna in colunas %}
+                        <th>{{ coluna }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for index, row in df.iterrows() %}
+                    <tr>
+                        {% for coluna in colunas %}
+                        <td>
+                            {% if row[coluna] is not none %}
+                                {{ row[coluna] }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Paginação -->
+        {% if total_paginas > 1 %}
+        <nav aria-label="Paginação">
+            <ul class="pagination justify-content-center">
+                {% if pagina > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="?pagina={{ pagina - 1 }}&por_pagina={{ por_pagina }}">Anterior</a>
+                </li>
+                {% endif %}
+                
+                {% for p in range(1, total_paginas + 1) %}
+                    {% if p == pagina %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ p }}</span>
+                    </li>
+                    {% elif p <= 3 or p > total_paginas - 3 or (p >= pagina - 1 and p <= pagina + 1) %}
+                    <li class="page-item">
+                        <a class="page-link" href="?pagina={{ p }}&por_pagina={{ por_pagina }}">{{ p }}</a>
+                    </li>
+                    {% elif p == 4 or p == total_paginas - 3 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if pagina < total_paginas %}
+                <li class="page-item">
+                    <a class="page-link" href="?pagina={{ pagina + 1 }}&por_pagina={{ por_pagina }}">Próxima</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+        
+        <div class="text-center mt-3">
+            <small class="text-muted">
+                Página {{ pagina }} de {{ total_paginas }} | 
+                Mostrando {{ ((pagina - 1) * por_pagina) + 1 }} a {{ [pagina * por_pagina, total_linhas]|min }} de {{ total_linhas }} registros
+            </small>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

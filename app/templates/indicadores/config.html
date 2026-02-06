@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Configuração de Indicadores - Sistema SAMU{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-sliders"></i> Configuração de Indicadores</h1>
+    <div>
+        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+        <a href="{{ url_for('indicadores.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Novo Indicador
+        </a>
+        <a href="{{ url_for('indicadores.painel') }}" class="btn btn-success">
+            <i class="bi bi-speedometer2"></i> Ver Painel
+        </a>
+    </div>
+</div>
+
+{% if indicadores %}
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-list-ul"></i> Indicadores Configurados ({{ indicadores|length }})</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Ordem</th>
+                        <th>Nome</th>
+                        <th>Tipo</th>
+                        <th>Janela da Média Móvel</th>
+                        <th>Período do Gráfico (horas)</th>
+                        <th>Contabilizar</th>
+                        <th>Condições</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for indicador in indicadores %}
+                    <tr>
+                        <td class="ordem-cell" data-id="{{ indicador.id }}" data-ordem="{{ indicador.ordem }}" style="cursor: pointer;" title="Clique para editar">
+                            <span class="ordem-valor">{{ indicador.ordem }}</span>
+                            <input type="number" class="form-control form-control-sm ordem-input" value="{{ indicador.ordem }}" min="0" style="display: none; width: 70px;">
+                        </td>
+                        <td>
+                            <strong>{{ indicador.nome }}</strong>
+                            {% if indicador.descricao %}
+                            <br><small class="text-muted">{{ indicador.descricao }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-info">{{ indicador.tipo_calculo }}</span>
+                            {% if indicador.unidade %}
+                            <br><small>{{ indicador.unidade }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if indicador.filtro_ultimas_horas %}
+                            {% set c_janela = indicador.filtro_ultimas_horas|gray_gradient(min_janela, max_janela) %}
+                            <span class="badge" style="background-color: {{ c_janela.bg }}; color: {{ c_janela.color }};">{{ indicador.filtro_ultimas_horas }}h</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if indicador.grafico_habilitado and indicador.grafico_ultimas_horas %}
+                            {% set c_periodo = indicador.grafico_ultimas_horas|gray_gradient(min_periodo, max_periodo) %}
+                            <span class="badge" style="background-color: {{ c_periodo.bg }}; color: {{ c_periodo.color }};">{{ indicador.grafico_ultimas_horas }}h</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if indicador.contagem_por == 'ocorrencia' %}
+                            <small>Por ocorrência</small>
+                            {% if indicador.coluna_ocorrencia %}
+                            <br><small class="text-muted">{{ indicador.coluna_ocorrencia }}</small>
+                            {% endif %}
+                            {% else %}
+                            <small>Todas as linhas</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set conds = indicador.get_condicoes_dict() %}
+                            {% if conds %}
+                                <small>
+                                    {% for cond in conds %}
+                                        <span class="badge bg-secondary">{{ cond.coluna }} {{ cond.operador }} {{ cond.valor or '' }}</span>
+                                    {% endfor %}
+                                </small>
+                            {% else %}
+                                <span class="text-muted">Sem condições</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if indicador.ativo %}
+                            <span class="badge bg-success">Ativo</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inativo</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('indicadores.calcular', id=indicador.id) }}" 
+                                   class="btn btn-outline-info" 
+                                   title="Calcular">
+                                    <i class="bi bi-calculator"></i>
+                                </a>
+                                <a href="{{ url_for('indicadores.duplicate', id=indicador.id) }}" 
+                                   class="btn btn-outline-secondary" 
+                                   title="Duplicar">
+                                    <i class="bi bi-copy"></i>
+                                </a>
+                                <a href="{{ url_for('indicadores.edit', id=indicador.id) }}" 
+                                   class="btn btn-outline-warning" 
+                                   title="Editar">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <form method="POST" action="{{ url_for('indicadores.delete', id=indicador.id) }}" 
+                                      class="d-inline" 
+                                      onsubmit="return confirm('Tem certeza que deseja deletar este indicador?');">
+                                    <button type="submit" class="btn btn-outline-danger" title="Deletar">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Nenhum indicador configurado ainda. 
+    <a href="{{ url_for('indicadores.create') }}">Criar primeiro indicador</a>
+</div>
+{% endif %}
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-info-circle"></i> Colunas Disponíveis</h5>
+    </div>
+    <div class="card-body">
+        <p>Total de colunas: <strong>{{ colunas|length }}</strong></p>
+        <div class="row">
+            {% for coluna in colunas %}
+            <div class="col-md-3 mb-2">
+                <code>{{ coluna }}</code>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    document.querySelectorAll('.ordem-cell').forEach(function(cell) {
+        var span = cell.querySelector('.ordem-valor');
+        var input = cell.querySelector('.ordem-input');
+        var id = parseInt(cell.dataset.id, 10);
+
+        function salvar() {
+            var val = parseInt(input.value, 10);
+            if (isNaN(val) || val < 0) val = 0;
+            input.value = val;
+            fetch('{{ url_for("indicadores.api_update_ordem", id=0) }}'.replace(/0$/, id), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ordem: val })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    span.textContent = data.ordem;
+                    input.value = data.ordem;
+                }
+            })
+            .catch(function() { span.textContent = input.value; })
+            .finally(function() {
+                span.style.display = '';
+                input.style.display = 'none';
+            });
+        }
+
+        function cancelar() {
+            input.value = span.textContent;
+            span.style.display = '';
+            input.style.display = 'none';
+        }
+
+        cell.addEventListener('click', function(e) {
+            if (input.style.display === 'none') {
+                span.style.display = 'none';
+                input.style.display = 'inline-block';
+                input.focus();
+                input.select();
+            }
+        });
+
+        input.addEventListener('blur', salvar);
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); salvar(); }
+            if (e.key === 'Escape') { e.preventDefault(); cancelar(); }
+        });
+        input.addEventListener('click', function(e) { e.stopPropagation(); });
+    });
+})();
+</script>
+{% endblock %}

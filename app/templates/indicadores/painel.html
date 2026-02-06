@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Painel de Indicadores - Sistema SAMU{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-speedometer2"></i> Painel de Indicadores</h1>
+    <div>
+        <a href="{{ url_for('indicadores.config') }}" class="btn btn-primary">
+            <i class="bi bi-sliders"></i> Configurar
+        </a>
+        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+    </div>
+</div>
+
+{% if resultados %}
+<div class="row">
+    {% for resultado in resultados %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100 {% if resultado.get('valor') is not none %}border-success{% else %}border-secondary{% endif %}">
+            <div class="card-header {% if resultado.get('valor') is not none %}bg-success text-white{% else %}bg-secondary text-white{% endif %}">
+                <h5 class="mb-0">
+                    <i class="bi bi-{% if resultado.get('valor') is not none %}check-circle{% else %}clock{% endif %}"></i>
+                    {{ resultado.get('nome', 'Indicador') }}
+                </h5>
+            </div>
+            <div class="card-body">
+                {# Sempre exibir valor ou "--" #}
+                <div class="text-center mb-3">
+                    {% if resultado.get('valor') is not none %}
+                    <h2 class="display-4">
+                        {{ resultado.get('valor')|formatar_indicador(resultado.get('tipo_calculo', 'diferenca_tempo'), resultado.get('unidade', 'minutos')) }}
+                    </h2>
+                    {% else %}
+                    <h2 class="display-4 text-muted">--</h2>
+                    {% endif %}
+                    {% if resultado.get('unidade') and resultado.get('tipo_calculo') != 'diferenca_tempo' %}
+                    <p class="text-muted mb-0">{{ resultado.get('unidade') }}</p>
+                    {% endif %}
+                </div>
+                
+                {% if resultado.get('minimo') is not none or resultado.get('maximo') is not none %}
+                <div class="row text-center small">
+                    {% if resultado.get('minimo') is not none %}
+                    <div class="col-6">
+                        <strong>Mín:</strong><br>
+                        {{ resultado.get('minimo')|formatar_indicador(resultado.get('tipo_calculo', 'diferenca_tempo'), resultado.get('unidade', 'minutos')) }}
+                    </div>
+                    {% endif %}
+                    {% if resultado.get('maximo') is not none %}
+                    <div class="col-6">
+                        <strong>Máx:</strong><br>
+                        {{ resultado.get('maximo')|formatar_indicador(resultado.get('tipo_calculo', 'diferenca_tempo'), resultado.get('unidade', 'minutos')) }}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                {% if resultado.get('mediana') is not none %}
+                <div class="text-center mt-2 small">
+                    <strong>Mediana:</strong> {{ resultado.get('mediana')|formatar_indicador(resultado.get('tipo_calculo', 'diferenca_tempo'), resultado.get('unidade', 'minutos')) }}
+                </div>
+                {% endif %}
+                
+                <hr>
+                
+                <div class="small text-muted">
+                    <div class="row">
+                        <div class="col-6">
+                            <strong>Total:</strong> {{ resultado.get('total_registros', 0) }}
+                        </div>
+                        <div class="col-6">
+                            <strong>Filtrados:</strong> {{ resultado.get('registros_filtrados', 0) }}
+                        </div>
+                    </div>
+                </div>
+                
+                {# Sempre exibir gráfico se habilitado #}
+                {% if resultado.get('grafico_habilitado') %}
+                <hr>
+                <div id="grafico_{{ resultado.get('id') }}" style="height: 200px;">
+                    <canvas id="chart_{{ resultado.get('id') }}"></canvas>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+// Carregar gráficos para todos os indicadores com gráfico habilitado
+{% for resultado in resultados %}
+    {% if resultado.get('grafico_habilitado') %}
+    fetch('{{ url_for("indicadores.grafico", id=resultado.get("id")) }}')
+        .then(response => response.json())
+        .then(data => {
+            const dados = Array.isArray(data) ? data : (data?.atual || []);
+            if (data && dados.length > 0 && !data.erro) {
+                const ctx = document.getElementById('chart_{{ resultado.get("id") }}');
+                if (ctx) {
+                    // Determinar cor baseada na tendência
+                    const valores = dados.map(d => d.valor).filter(v => v !== null);
+                    const primeiro = valores[0];
+                    const ultimo = valores[valores.length - 1];
+                    const valorSubiu = ultimo > primeiro;
+                    const valorDesceu = ultimo < primeiro;
+                    
+                    const corSubida = '{{ resultado.get("cor_subida") or "#34c759" }}';
+                    const corDescida = '{{ resultado.get("cor_descida") or "#ff3b30" }}';
+                    const cor = valorSubiu ? corSubida : (valorDesceu ? corDescida : corSubida);
+                    const corHex = cor.startsWith('#') ? cor : '#' + cor;
+                    const corArea20 = corHex + '33';  // 20% opacidade
+                    const datasets = [{
+                        label: '{{ resultado.get("nome") }}',
+                        data: dados.map(d => d.valor),
+                        borderColor: cor,
+                        backgroundColor: corArea20,
+                        tension: 0.3,
+                        fill: true
+                    }];
+                    if (data.historico && data.historico.length === dados.length) {
+                        datasets.push({
+                            label: 'Histórico',
+                            data: data.historico,
+                            borderColor: data.historico_cor || '#6c757d',
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        });
+                    }
+                    if (data.meta && data.meta.length === dados.length) {
+                        var dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
+                        datasets.push({
+                            label: 'Meta',
+                            data: data.meta,
+                            borderColor: data.meta_cor || '#ffc107',
+                            borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
+                            fill: false,
+                            tension: 0,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        });
+                    }
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: dados.map(d => d.display_label || d.label),
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const value = context.raw;
+                                            if (value != null) {
+                                                const idx = context.datasetIndex;
+                                                const u = ('{{ resultado.get("unidade") or "" }}' || '').toLowerCase();
+                                                const fmt = (u === 'ocorrências' || u === 'regulações' || u === 'empenhos') ? Math.round(value) : value.toFixed(2);
+                                                const prefix = idx === 0 ? 'Valor' : (context.dataset.label || '');
+                                                return `${prefix}: ${fmt} ${u}`.trim();
+                                            }
+                                            return 'Sem dados';
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        })
+        .catch(error => console.error('Erro ao carregar gráfico:', error));
+    {% endif %}
+{% endfor %}
+
+// Auto-refresh a cada 5 minutos (300000 ms)
+setInterval(function() {
+    console.log('Atualizando painel...');
+    window.location.reload();
+}, 300000); // 5 minutos
+</script>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Nenhum indicador configurado. 
+    <a href="{{ url_for('indicadores.config') }}">Configure indicadores</a> para visualizar o painel.
+</div>
+{% endif %}
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-info-circle"></i> Informações</h5>
+    </div>
+    <div class="card-body">
+        <p>Este painel exibe todos os indicadores configurados e calculados a partir dos dados mais recentes.</p>
+        <p class="mb-0">
+            <strong>Última atualização:</strong> Os dados são calculados em tempo real a partir do arquivo 
+            <code>convertido_tabela.xlsx</code> disponível no sistema.
+        </p>
+    </div>
+</div>
+{% endblock %}

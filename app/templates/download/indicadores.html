@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}Indicadores Detalhados - Sistema Flask{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-graph-up-arrow"></i> Indicadores Detalhados</h1>
+    <div>
+        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+        <a href="{{ url_for('download.ver_dados') }}" class="btn btn-primary">
+            <i class="bi bi-table"></i> Ver Dados
+        </a>
+    </div>
+</div>
+
+<!-- Indicadores Gerais -->
+{% if indicadores %}
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Indicadores Gerais</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% if indicadores.get('total_ocorrencias') %}
+            <div class="col-md-3 mb-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body text-center">
+                        <h2>{{ indicadores.get('total_ocorrencias') }}</h2>
+                        <p class="mb-0">Total de Ocorrências</p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if indicadores.get('tempo_medio') %}
+            <div class="col-md-3 mb-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h4>{{ indicadores.get('tempo_medio') }}</h4>
+                        <p class="mb-0">Tempo Médio</p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if indicadores.get('tempo_minimo') %}
+            <div class="col-md-3 mb-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <h4>{{ indicadores.get('tempo_minimo') }}</h4>
+                        <p class="mb-0">Tempo Mínimo</p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if indicadores.get('tempo_maximo') %}
+            <div class="col-md-3 mb-3">
+                <div class="card bg-warning text-dark">
+                    <div class="card-body text-center">
+                        <h4>{{ indicadores.get('tempo_maximo') }}</h4>
+                        <p class="mb-0">Tempo Máximo</p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        {% if indicadores.get('data_mais_recente') %}
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <p><strong>Data Mais Recente:</strong> {{ indicadores.get('data_mais_recente') }}</p>
+            </div>
+            {% if indicadores.get('data_mais_antiga') %}
+            <div class="col-md-6">
+                <p><strong>Data Mais Antiga:</strong> {{ indicadores.get('data_mais_antiga') }}</p>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Distribuições -->
+{% if indicadores.get('por_tipo') %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Distribuição por Tipo</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Quantidade</th>
+                        <th>Percentual</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set total = indicadores.get('por_tipo', {}).values()|sum %}
+                    {% for tipo, quantidade in indicadores.get('por_tipo', {}).items() %}
+                    <tr>
+                        <td>{{ tipo }}</td>
+                        <td>{{ quantidade }}</td>
+                        <td>{{ "%.2f"|format((quantidade / total * 100)) if total > 0 else 0 }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if indicadores.get('por_status') %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-check-circle"></i> Distribuição por Status</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Quantidade</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for status, quantidade in indicadores.get('por_status', {}).items() %}
+                    <tr>
+                        <td>{{ status }}</td>
+                        <td>{{ quantidade }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Estatísticas por Coluna -->
+{% if estatisticas_colunas %}
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-list-columns"></i> Estatísticas por Coluna</h5>
+    </div>
+    <div class="card-body">
+        <div class="accordion" id="accordionColunas">
+            {% for coluna, stats in estatisticas_colunas.items() %}
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="heading{{ loop.index }}">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ loop.index }}">
+                        {{ coluna }}
+                    </button>
+                </h2>
+                <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#accordionColunas">
+                    <div class="accordion-body">
+                        <table class="table table-sm">
+                            <tr><td><strong>Tipo:</strong></td><td>{{ stats.get('tipo', 'N/A') }}</td></tr>
+                            <tr><td><strong>Total:</strong></td><td>{{ stats.get('total', 0) }}</td></tr>
+                            <tr><td><strong>Nulos:</strong></td><td>{{ stats.get('nulos', 0) }}</td></tr>
+                            <tr><td><strong>Valores Únicos:</strong></td><td>{{ stats.get('unicos', 0) }}</td></tr>
+                            {% if stats.get('media') is not none %}
+                            <tr><td><strong>Média:</strong></td><td>{{ "%.2f"|format(stats.get('media')) }}</td></tr>
+                            {% endif %}
+                            {% if stats.get('mediana') is not none %}
+                            <tr><td><strong>Mediana:</strong></td><td>{{ "%.2f"|format(stats.get('mediana')) }}</td></tr>
+                            {% endif %}
+                            {% if stats.get('minimo') is not none %}
+                            <tr><td><strong>Mínimo:</strong></td><td>{{ "%.2f"|format(stats.get('minimo')) }}</td></tr>
+                            {% endif %}
+                            {% if stats.get('maximo') is not none %}
+                            <tr><td><strong>Máximo:</strong></td><td>{{ "%.2f"|format(stats.get('maximo')) }}</td></tr>
+                            {% endif %}
+                        </table>
+                        {% if stats.get('top_valores') %}
+                        <h6>Valores Mais Frequentes:</h6>
+                        <ul class="list-group">
+                            {% for valor, count in stats.get('top_valores', {}).items() %}
+                            <li class="list-group-item d-flex justify-content-between">
+                                {{ valor }}
+                                <span class="badge bg-primary">{{ count }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

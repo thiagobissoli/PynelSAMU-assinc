@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Configurar Download Automático - Sistema SAMU{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-gear"></i> Configurar Download Automático</h1>
+    <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-clock"></i> Configurações de Agendamento</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST">
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="ativo" name="ativo" 
+                           {% if config.ativo %}checked{% endif %}>
+                    <label class="form-check-label" for="ativo">
+                        <strong>Ativar Download Automático</strong>
+                    </label>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <div class="mb-3">
+                <label class="form-label"><strong>Tipo de Agendamento</strong></label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="tipo_agendamento" id="tipo_intervalo" 
+                           value="intervalo" {% if config.tipo_agendamento == 'intervalo' %}checked{% endif %}>
+                    <label class="form-check-label" for="tipo_intervalo">
+                        A cada X minutos
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="tipo_agendamento" id="tipo_hora_fixa" 
+                           value="hora_fixa" {% if config.tipo_agendamento == 'hora_fixa' %}checked{% endif %}>
+                    <label class="form-check-label" for="tipo_hora_fixa">
+                        Hora fixa do dia
+                    </label>
+                </div>
+            </div>
+            
+            <div id="config_intervalo" style="display: {% if config.tipo_agendamento == 'intervalo' %}block{% else %}none{% endif %};">
+                <div class="mb-3">
+                    <label for="intervalo_minutos" class="form-label">Intervalo (minutos)</label>
+                    <input type="number" class="form-control" id="intervalo_minutos" name="intervalo_minutos" 
+                           value="{{ config.intervalo_minutos }}" min="1" required>
+                    <small class="form-text text-muted">Ex: 60 para executar a cada hora</small>
+                </div>
+            </div>
+            
+            <div id="config_hora_fixa" style="display: {% if config.tipo_agendamento == 'hora_fixa' %}block{% else %}none{% endif %};">
+                <div class="mb-3">
+                    <label for="hora_fixa" class="form-label">Hora do dia</label>
+                    <input type="number" class="form-control" id="hora_fixa" name="hora_fixa" 
+                           value="{{ config.hora_fixa or 0 }}" min="0" max="23" required>
+                    <small class="form-text text-muted">Hora em formato 24h (0-23). Ex: 8 para 08:00</small>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <div class="mb-3">
+                <label for="dias_atras" class="form-label">Dias Atrás</label>
+                <input type="number" class="form-control" id="dias_atras" name="dias_atras" 
+                       value="{{ config.dias_atras }}" min="1" required>
+                <small class="form-text text-muted">Quantos dias atrás buscar dados em cada download</small>
+            </div>
+            
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                <strong>Importante:</strong> O download será executado automaticamente conforme a configuração acima.
+                Os downloads são executados em background e não bloqueiam o sistema.
+            </div>
+            
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Salvar Configuração
+            </button>
+        </form>
+    </div>
+</div>
+
+{% if config.ultima_execucao or config.proxima_execucao %}
+<div class="card mt-4">
+    <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Histórico</h5>
+    </div>
+    <div class="card-body">
+        {% if config.ultima_execucao %}
+        <p><strong>Última execução:</strong> {{ config.ultima_execucao | horario_sao_paulo }}</p>
+        <p>
+            <strong>Status:</strong> 
+            {% if config.ultimo_status == 'sucesso' %}
+            <span class="badge bg-success">Sucesso</span>
+            {% elif config.ultimo_status == 'erro' %}
+            <span class="badge bg-danger">Erro</span>
+            {% if config.ultimo_erro %}
+            <br><small class="text-danger">{{ config.ultimo_erro }}</small>
+            {% endif %}
+            {% elif config.ultimo_status == 'executando' %}
+            <span class="badge bg-warning">Executando...</span>
+            {% else %}
+            <span class="badge bg-secondary">N/A</span>
+            {% endif %}
+        </p>
+        {% endif %}
+        
+        {% if config.proxima_execucao %}
+        <p><strong>Próxima execução:</strong> {{ config.proxima_execucao | horario_sao_paulo }}</p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tipoIntervalo = document.getElementById('tipo_intervalo');
+    const tipoHoraFixa = document.getElementById('tipo_hora_fixa');
+    const configIntervalo = document.getElementById('config_intervalo');
+    const configHoraFixa = document.getElementById('config_hora_fixa');
+    
+    tipoIntervalo.addEventListener('change', function() {
+        if (this.checked) {
+            configIntervalo.style.display = 'block';
+            configHoraFixa.style.display = 'none';
+            document.getElementById('hora_fixa').removeAttribute('required');
+            document.getElementById('intervalo_minutos').setAttribute('required', 'required');
+        }
+    });
+    
+    tipoHoraFixa.addEventListener('change', function() {
+        if (this.checked) {
+            configIntervalo.style.display = 'none';
+            configHoraFixa.style.display = 'block';
+            document.getElementById('intervalo_minutos').removeAttribute('required');
+            document.getElementById('hora_fixa').setAttribute('required', 'required');
+        }
+    });
+});
+</script>
+{% endblock %}

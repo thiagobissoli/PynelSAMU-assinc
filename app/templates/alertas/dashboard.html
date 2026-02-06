@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard de Alertas{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Tema Dark/Light - igual aos dashboards */
+.alertas-dashboard-wrap {
+    --bg-primary: #000000;
+    --bg-secondary: #1c1c1e;
+    --bg-card: #2c2c2e;
+    --text-primary: #ffffff;
+    --text-secondary: #8e8e93;
+    --border-color: #38383a;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+    margin-top: -1rem;
+    margin-bottom: -2rem;
+    padding: 1.5rem 15px 2rem;
+    min-height: calc(100vh - 56px);
+}
+.alertas-dashboard-wrap.theme-light {
+    --bg-primary: #f5f5f7;
+    --bg-secondary: #ffffff;
+    --bg-card: #ffffff;
+    --text-primary: #000000;
+    --text-secondary: #6c6c70;
+    --border-color: #d1d1d6;
+}
+.alertas-dashboard-wrap .btn-outline-theme {
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+    background: transparent;
+}
+.alertas-dashboard-wrap .btn-outline-theme:hover {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+.alertas-dashboard-wrap .card {
+    background: var(--bg-card);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+.alertas-dashboard-wrap .list-group-item {
+    background: var(--bg-card);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+.alertas-dashboard-wrap .list-group-item .text-muted {
+    color: var(--text-secondary) !important;
+}
+.alertas-dashboard-wrap .alert-info {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+.alertas-dashboard-wrap .badge.bg-secondary {
+    background: var(--bg-card) !important;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+.alertas-dashboard-wrap .alerta-titulo {
+    text-transform: uppercase;
+}
+.alertas-dashboard-wrap .alerta-conteudo-direita {
+    font-size: 1.1rem;
+}
+.alertas-dashboard-wrap .alerta-conteudo-direita p {
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+}
+.alertas-dashboard-wrap .alerta-conteudo-direita small {
+    font-size: 1rem;
+}
+.alertas-dashboard-wrap .alerta-metadata {
+    font-size: 0.75rem;
+    opacity: 0.9;
+}
+.alertas-dashboard-wrap .alerta-metadata .bi {
+    font-size: 0.75rem !important;
+}
+.alertas-dashboard-wrap .alerta-datetime {
+    font-size: 0.75rem;
+    opacity: 0.9;
+}
+body.alertas-dashboard-page { background: #000 !important; }
+body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="alertas-dashboard-wrap theme-dark" id="alertasDashboard">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h1 class="mb-0"><i class="bi bi-bell-fill"></i> Dashboard de Alertas</h1>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-theme" id="btnToggleTheme" title="Alternar tema">
+            <i class="bi bi-moon-stars" id="iconTheme"></i>
+            <span id="labelTheme">Claro</span>
+        </button>
+        <a href="{{ url_for('alertas.manual_create') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-circle"></i> Criar Alerta Manual
+        </a>
+        <form method="POST" action="{{ url_for('alertas.gerar') }}" class="d-inline">
+            <button type="submit" class="btn btn-success btn-sm">
+                <i class="bi bi-arrow-repeat"></i> Gerar Alertas
+            </button>
+        </form>
+        <a href="{{ url_for('alertas.config') }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-gear"></i> Configurar
+        </a>
+    </div>
+</div>
+
+<!-- Lista de Alertas -->
+<div class="list-group">
+    {% if alertas %}
+        {% for alerta in alertas %}
+        <div class="list-group-item list-group-item-action mb-2 border rounded shadow-sm"
+             style="background-color: {{ (alerta.cor_tipo or '#ff3b30') + ((config_sistema.transparencia_alerta if config_sistema and config_sistema.transparencia_alerta is not none else 20) | transparencia_hex) }} !important; border-left: 4px solid {{ alerta.cor_tipo or '#ff3b30' }} !important;">
+            <div class="row g-2 align-items-start">
+                <div class="col-12 col-md-4">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-{{ alerta.icone_tipo or 'exclamation-triangle' }} me-2 flex-shrink-0"
+                           style="color: {{ alerta.cor_tipo or '#ff3b30' }}; font-size: 1.5rem;"></i>
+                        <div>
+                            <h4 class="mb-0 fw-bold alerta-titulo">{{ alerta.titulo.split(' - ')[0] if ' - ' in alerta.titulo else alerta.titulo }}</h4>
+                            <small class="alerta-datetime text-muted d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-8 d-flex justify-content-between align-items-center alerta-conteudo-direita">
+                    <div>
+                        <p class="mb-1">{{ alerta.mensagem }}</p>
+                        {% if alerta.detalhes %}
+                        {% set detalhes = alerta.detalhes | from_json %}
+                        {% if detalhes.numero_ocorrencia %}
+                        <small class="alerta-metadata text-muted d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
+                        {% endif %}
+                        {% endif %}
+                    </div>
+                    <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0">
+                        <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="Resolver">
+                            <span class="fw-bold">{{ 'M' if alerta.nome_tipo == 'Manual' else 'A' }}</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.
+        </div>
+    {% endif %}
+</div>
+</div>
+
+<script>
+(function() {
+    document.body.classList.add('alertas-dashboard-page');
+    var STORAGE_KEY = 'alertas_dashboard_theme';
+    var wrap = document.getElementById('alertasDashboard');
+    var btn = document.getElementById('btnToggleTheme');
+    var icon = document.getElementById('iconTheme');
+    var label = document.getElementById('labelTheme');
+    
+    function applyTheme(isDark) {
+        if (isDark) {
+            wrap.classList.remove('theme-light');
+            wrap.classList.add('theme-dark');
+            document.body.classList.remove('theme-light');
+            document.body.classList.add('theme-dark');
+            icon.className = 'bi bi-sun';
+            label.textContent = 'Claro';
+        } else {
+            wrap.classList.remove('theme-dark');
+            wrap.classList.add('theme-light');
+            document.body.classList.remove('theme-dark');
+            document.body.classList.add('theme-light');
+            icon.className = 'bi bi-moon-stars';
+            label.textContent = 'Escuro';
+        }
+        document.body.style.background = isDark ? '#000' : '#f5f5f7';
+        try { localStorage.setItem(STORAGE_KEY, isDark ? 'dark' : 'light'); } catch (e) {}
+    }
+    
+    function toggleTheme() {
+        var isDark = wrap.classList.contains('theme-dark');
+        applyTheme(!isDark);
+    }
+    
+    btn.addEventListener('click', toggleTheme);
+    
+    var saved = null;
+    try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (saved === 'light') {
+        applyTheme(false);
+    } else {
+        applyTheme(true);
+    }
+})();
+
+// Polling para detectar novos alertas e emitir som
+(function() {
+    var knownAlertaIds = new Set([{% for a in alertas %}{{ a.id }}{% if not loop.last %}, {% endif %}{% endfor %}]);
+    var pollInterval = 30000; // 30 segundos
+
+    function playSom(id) {
+        if (!id || id === 'none') return;
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            var ctx = new Ctx();
+            function beep(freq, start, dur) {
+                var o = ctx.createOscillator();
+                var g = ctx.createGain();
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.frequency.value = freq;
+                o.type = 'sine';
+                g.gain.value = 0.25;
+                o.start(ctx.currentTime + start);
+                o.stop(ctx.currentTime + start + dur);
+            }
+            if (id === 'beep') beep(800, 0, 0.25);
+            else if (id === 'beep2') { beep(800, 0, 0.15); beep(800, 0.25, 0.15); }
+            else if (id === 'alert') beep(1000, 0, 0.4);
+            else if (id === 'notification') { beep(660, 0, 0.1); beep(880, 0.15, 0.1); beep(1100, 0.3, 0.15); }
+            else if (id === 'urgente') { beep(600, 0, 0.1); beep(800, 0.12, 0.1); beep(1000, 0.24, 0.1); beep(800, 0.36, 0.15); }
+            else beep(800, 0, 0.25);
+        } catch (e) {}
+    }
+
+    function pollAlertas() {
+        fetch('{{ url_for("alertas.api_ativos") }}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.alertas || !data.config) return;
+                var novos = data.alertas.filter(function(a) { return !knownAlertaIds.has(a.id); });
+                var novosAutomaticos = novos.filter(function(a) { return a.origem === 'automatico'; });
+                var som = data.config.som_alerta || 'beep';
+                if (novosAutomaticos.length > 0 && som !== 'none') {
+                    playSom(som);
+                }
+                data.alertas.forEach(function(a) { knownAlertaIds.add(a.id); });
+            })
+            .catch(function() {});
+    }
+    setInterval(pollAlertas, pollInterval);
+})();
+
+setTimeout(function() { location.reload(); }, 300000);
+</script>
+{% endblock %}

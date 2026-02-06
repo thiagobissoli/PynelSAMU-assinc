@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboards - Sistema SAMU{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-grid"></i> Dashboards</h1>
+    <div>
+        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+        <a href="{{ url_for('dashboards.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Novo Dashboard
+        </a>
+    </div>
+</div>
+
+{% if dashboards %}
+<div class="row">
+    {% for dashboard in dashboards %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-speedometer2"></i> {{ dashboard.nome }}
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if dashboard.descricao %}
+                <p class="text-muted">{{ dashboard.descricao }}</p>
+                {% endif %}
+                
+                <p><strong>Indicadores:</strong> {{ dashboard.indicadores|length }}</p>
+                <p><strong>Tema:</strong> 
+                    <span class="badge bg-{% if dashboard.cor_tema == 'dark' %}dark{% else %}light text-dark{% endif %}">
+                        {{ dashboard.cor_tema|title }}
+                    </span>
+                </p>
+                
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <a href="{{ url_for('dashboards.view', id=dashboard.id) }}" class="btn btn-sm btn-success">
+                        <i class="bi bi-list"></i> Lista
+                    </a>
+                    <a href="{{ url_for('dashboards.widgets', id=dashboard.id) }}" class="btn btn-sm btn-info">
+                        <i class="bi bi-grid-3x3-gap"></i> Widgets
+                    </a>
+                    <a href="{{ url_for('dashboards.widgets_config', id=dashboard.id) }}" class="btn btn-sm btn-secondary">
+                        <i class="bi bi-sliders"></i> Config
+                    </a>
+                    <a href="{{ url_for('dashboards.edit', id=dashboard.id) }}" class="btn btn-sm btn-warning">
+                        <i class="bi bi-pencil"></i>
+                    </a>
+                    <form method="POST" action="{{ url_for('dashboards.delete', id=dashboard.id) }}" 
+                          class="d-inline" 
+                          onsubmit="return confirm('Tem certeza que deseja deletar este dashboard?');">
+                        <button type="submit" class="btn btn-sm btn-danger">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Nenhum dashboard criado ainda. 
+    <a href="{{ url_for('dashboards.create') }}">Criar primeiro dashboard</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,697 @@
+{% extends "base.html" %}
+
+{% block title %}{% if modo == 'create' %}Criar{% else %}Editar{% endif %} Configuração de Alerta - Sistema SAMU{% endblock %}
+
+{% block extra_head %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <i class="bi bi-{% if modo == 'create' %}plus-circle{% else %}pencil{% endif %}"></i>
+        {% if modo == 'create' %}Criar{% else %}Editar{% endif %} Configuração de Alerta
+    </h1>
+    <a href="{{ url_for('alertas.config') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <form method="POST" id="formAlerta">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Informações Básicas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="tipo" class="form-label">Tipo de Alerta <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="tipo" name="tipo"
+                               value="{{ config.tipo if config else '' }}" required
+                               placeholder="Ex: Múltiplos chamados, Tempo resposta elevado, Alta demanda...">
+                        <small class="form-text text-muted">Digite um nome livre para identificar este tipo de alerta</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="descricao" class="form-label">Descrição</label>
+                        <textarea class="form-control" id="descricao" name="descricao" rows="2">{{ config.descricao if config else '' }}</textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="ordem" class="form-label">Ordem</label>
+                            <input type="number" class="form-control" id="ordem" name="ordem"
+                                   value="{{ config.ordem if config else 0 }}" min="0">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="ativo" name="ativo"
+                                       {% if not config or config.ativo %}checked{% endif %}>
+                                <label class="form-check-label" for="ativo">Ativo</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sumir_quando_resolvido" name="sumir_quando_resolvido"
+                                   {% if config and config.sumir_quando_resolvido %}checked{% endif %}>
+                            <label class="form-check-label" for="sumir_quando_resolvido">
+                                <strong>Sumir automaticamente quando resolvido</strong>
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">Quando marcado, o alerta será removido automaticamente da lista quando os parâmetros que o criaram não existirem mais nos dados.</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="icone" class="form-label">Ícone</label>
+                            <select class="form-select" id="icone" name="icone">
+                                {% for valor, rotulo in icones %}
+                                <option value="{{ valor }}" data-icon="{{ valor }}" {% if (config and config.icone == valor) or (not config and valor == 'exclamation-triangle') %}selected{% endif %}>{{ rotulo }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="cor" class="form-label">Cor</label>
+                            <select class="form-select" id="cor" name="cor">
+                                <option value="#dc3545" data-color="#dc3545" {% if not config or (config.cor or '') == '#ff3b30' or (config.cor or '') == '#dc3545' %}selected{% endif %}>Vermelho</option>
+                                <option value="#fd7e14" data-color="#fd7e14" {% if config and config.cor == '#fd7e14' %}selected{% endif %}>Laranja</option>
+                                <option value="#ffc107" data-color="#ffc107" {% if config and config.cor == '#ffc107' %}selected{% endif %}>Amarelo</option>
+                                <option value="#28a745" data-color="#28a745" {% if config and config.cor == '#28a745' %}selected{% endif %}>Verde</option>
+                                <option value="#0d6efd" data-color="#0d6efd" {% if config and config.cor == '#0d6efd' %}selected{% endif %}>Azul</option>
+                                <option value="#6f42c1" data-color="#6f42c1" {% if config and config.cor == '#6f42c1' %}selected{% endif %}>Roxo</option>
+                                <option value="#e83e8c" data-color="#e83e8c" {% if config and config.cor == '#e83e8c' %}selected{% endif %}>Rosa</option>
+                                <option value="#20c997" data-color="#20c997" {% if config and config.cor == '#20c997' %}selected{% endif %}>Verde Água</option>
+                                <option value="#6c757d" data-color="#6c757d" {% if config and config.cor == '#6c757d' %}selected{% endif %}>Cinza</option>
+                                <option value="#212529" data-color="#212529" {% if config and config.cor == '#212529' %}selected{% endif %}>Preto</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tipo de Cálculo (igual aos indicadores) -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-calculator"></i> Tipo de Cálculo</h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        Permite alertas baseados em cálculos de indicadores (diferença de tempo, contagem, média, etc.).
+                        Se deixar em branco, o alerta usará apenas a coluna de dados e o tipo de verificação abaixo.
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="tipo_calculo" class="form-label">Tipo de Cálculo <span class="text-danger">*</span></label>
+                            <select class="form-select no-select2" id="tipo_calculo" name="tipo_calculo">
+                                <option value="">— Padrão (não usar) —</option>
+                                <option value="diferenca_tempo" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'diferenca_tempo' %}selected{% endif %}>Diferença de Tempo</option>
+                                <option value="diferenca_ate_agora" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'diferenca_ate_agora' %}selected{% endif %}>Tempo desde (até agora)</option>
+                                <option value="contagem" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'contagem' %}selected{% endif %}>Contagem</option>
+                                <option value="media" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'media' %}selected{% endif %}>Média</option>
+                                <option value="soma" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'soma' %}selected{% endif %}>Soma</option>
+                                <option value="percentual_meta" {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'percentual_meta' %}selected{% endif %}>% que atinge a meta</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="unidade" class="form-label">Unidade</label>
+                            <select class="form-select no-select2" id="unidade" name="unidade">
+                                <option value="segundos" {% if config and config.get_configuracoes_dict().get('unidade') == 'segundos' %}selected{% endif %}>Segundos</option>
+                                <option value="minutos" {% if not config or config.get_configuracoes_dict().get('unidade', 'minutos') == 'minutos' %}selected{% endif %}>Minutos</option>
+                                <option value="horas" {% if config and config.get_configuracoes_dict().get('unidade') == 'horas' %}selected{% endif %}>Horas</option>
+                                <option value="dias" {% if config and config.get_configuracoes_dict().get('unidade') == 'dias' %}selected{% endif %}>Dias</option>
+                                <option value="%" {% if config and config.get_configuracoes_dict().get('unidade') == '%' %}selected{% endif %}>%</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row" id="campos_tempo_alert" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') in ['diferenca_tempo', 'percentual_meta', 'diferenca_ate_agora'] %}block{% else %}none{% endif %};">
+                        <div class="col-md-6 mb-3" id="coluna_inicio_wrapper">
+                            <label for="coluna_data_inicio" class="form-label" id="label_coluna_inicio">{% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'diferenca_ate_agora' %}Data de referência (ex: Chegada no hospital){% else %}Coluna Data Início{% endif %}</label>
+                            <small class="form-text text-muted d-block" id="hint_diferenca_ate_agora" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'diferenca_ate_agora' %}block{% else %}none{% endif %};">Tempo entre esta data e o horário atual (Brasil/São Paulo)</small>
+                            <select class="form-select" id="coluna_data_inicio" name="coluna_data_inicio">
+                                <option value="">Selecione...</option>
+                                {% for coluna in colunas %}
+                                <option value="{{ coluna }}" {% if config and config.get_configuracoes_dict().get('coluna_data_inicio') == coluna %}selected{% endif %}{% if not config and coluna == 'Data ocorrência' %} selected{% endif %}>{{ coluna }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3" id="coluna_fim_wrapper" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'diferenca_ate_agora' %}none{% else %}block{% endif %};">
+                            <label for="coluna_data_fim" class="form-label">Coluna Data Fim</label>
+                            <select class="form-select" id="coluna_data_fim" name="coluna_data_fim">
+                                <option value="">Selecione...</option>
+                                {% for coluna in colunas %}
+                                <option value="{{ coluna }}" {% if config and config.get_configuracoes_dict().get('coluna_data_fim') == coluna %}selected{% endif %}{% if not config and coluna == 'Chegada no local' %} selected{% endif %}>{{ coluna }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row" id="campos_meta_alert" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') == 'percentual_meta' %}block{% else %}none{% endif %};">
+                        <div class="col-12 mb-3">
+                            <label class="form-label fw-bold">Meta (% que atinge)</label>
+                            <div class="row">
+                                <div class="col-md-4 mb-2 mb-md-0">
+                                    <label for="meta_valor_alert" class="form-label">Valor da meta</label>
+                                    <input type="number" step="any" class="form-control" id="meta_valor_alert" name="meta_valor" 
+                                           value="{{ config.get_configuracoes_dict().get('meta_valor') if config else '' }}" placeholder="Ex: 15">
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="meta_operador_alert" class="form-label">Atinge quando</label>
+                                    <select class="form-select" id="meta_operador_alert" name="meta_operador">
+                                        <option value="<=" {% if not config or config.get_configuracoes_dict().get('meta_operador', '<=') == '<=' %}selected{% endif %}>≤ (menor ou igual)</option>
+                                        <option value=">=" {% if config and config.get_configuracoes_dict().get('meta_operador') == '>=' %}selected{% endif %}>≥ (maior ou igual)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row" id="campos_alerta_condicao" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') in ['diferenca_tempo', 'contagem', 'media', 'soma'] %}block{% else %}none{% endif %};">
+                        <div class="col-12 mb-3">
+                            <label class="form-label fw-bold">Condição para disparar o alerta</label>
+                            <p class="text-muted small mb-2">Defina quando o valor calculado deve gerar o alerta (ex.: diferença de tempo &gt;= 30 minutos).</p>
+                            <div class="row">
+                                <div class="col-md-4 mb-2 mb-md-0">
+                                    <label for="alerta_operador" class="form-label">Operador</label>
+                                    <select class="form-select" id="alerta_operador" name="alerta_operador">
+                                        <option value=">=" {% if not config or config.get_configuracoes_dict().get('alerta_operador', '>=') == '>=' %}selected{% endif %}>≥ (maior ou igual)</option>
+                                        <option value="<=" {% if config and config.get_configuracoes_dict().get('alerta_operador') == '<=' %}selected{% endif %}>≤ (menor ou igual)</option>
+                                        <option value=">" {% if config and config.get_configuracoes_dict().get('alerta_operador') == '>' %}selected{% endif %}>&gt; (maior que)</option>
+                                        <option value="<" {% if config and config.get_configuracoes_dict().get('alerta_operador') == '<' %}selected{% endif %}>&lt; (menor que)</option>
+                                        <option value="==" {% if config and config.get_configuracoes_dict().get('alerta_operador') == '==' %}selected{% endif %}== (igual a)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-2 mb-md-0">
+                                    <label for="alerta_valor" class="form-label">Valor limite <span class="text-danger">*</span></label>
+                                    <input type="number" step="any" class="form-control" id="alerta_valor" name="alerta_valor" 
+                                           value="{{ config.get_configuracoes_dict().get('alerta_valor') if config else '' }}" placeholder="Ex: 30">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Unidade</label>
+                                    <p class="form-control-plaintext small text-muted mb-0">Usa a unidade definida acima (minutos, horas, etc.)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row" id="campos_numerico_alert" style="display: {% if config and config.get_configuracoes_dict().get('tipo_calculo') in ['media', 'soma'] %}block{% else %}none{% endif %};">
+                        <div class="col-md-12 mb-3">
+                            <label for="coluna_numerica_alert" class="form-label">Coluna Numérica</label>
+                            <select class="form-select" id="coluna_numerica_alert" name="coluna_data_fim_numerica">
+                                <option value="">Selecione...</option>
+                                {% for coluna in colunas %}
+                                <option value="{{ coluna }}" {% if config and config.get_configuracoes_dict().get('coluna_data_fim') == coluna %}selected{% endif %}>{{ coluna }}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Para Média e Soma: coluna com os valores numéricos</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-4">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0">Período</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="periodo_verificacao_horas" class="form-label">Período de Verificação (horas)</label>
+                            <input type="number" class="form-control" id="periodo_verificacao_horas" name="periodo_verificacao_horas"
+                                   value="{{ config.periodo_verificacao_horas if config else 1 }}" min="1">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="coluna_data_filtro" class="form-label">Coluna de Data para Filtro</label>
+                            <select class="form-select" id="coluna_data_filtro" name="coluna_data_filtro">
+                                <option value="">Selecione...</option>
+                                {% for coluna in colunas %}
+                                <option value="{{ coluna }}" {% if config and config.coluna_data_filtro == coluna %}selected{% endif %}{% if not config and coluna == 'Data ocorrência' %} selected{% endif %}>{{ coluna }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coluna de Dados (opcional quando Tipo de Cálculo está definido) -->
+            <div class="card mt-4" id="card_coluna_dados">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-database"></i> Coluna de Dados</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="coluna_dados" class="form-label">Coluna Principal <span class="text-danger" id="coluna_dados_obrigatorio">*</span></label>
+                        <select class="form-select" id="coluna_dados" name="coluna_dados">
+                            <option value="">Selecione ou busque a coluna onde buscar os dados...</option>
+                            {% for coluna in colunas %}
+                            <option value="{{ coluna }}" {% if config and config.get_configuracoes_dict().get('coluna_dados') == coluna %}selected{% endif %}>{{ coluna }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Esta é a coluna principal onde o alerta irá buscar e analisar os dados (ex: Telefone, Município, Ocorrência). <strong>Opcional</strong> quando Tipo de Cálculo está definido. Para "Tempo desde (até agora)", se preenchida, será usada para listar as unidades que excedem o limite no alerta (ex: coluna Unidade, Veículo).</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contabilizar -->
+            <div class="card mt-4">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="bi bi-calculator"></i> Contabilizar</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-2">Várias linhas podem ter o mesmo número de ocorrência (ex.: várias ambulâncias no mesmo atendimento). Escolha se conta cada linha ou cada ocorrência única.</p>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="contagem_por" id="contagem_linhas_alert" value="linhas" {% if not config or (config.get_configuracoes_dict().get('contagem_por', 'linhas') == 'linhas') %}checked{% endif %}>
+                                <label class="form-check-label" for="contagem_linhas_alert">Todas as linhas</label>
+                            </div>
+                            <small class="text-muted d-block ms-4">Cada linha do dado conta separadamente.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="contagem_por" id="contagem_ocorrencia_alert" value="ocorrencia" {% if config and config.get_configuracoes_dict().get('contagem_por') == 'ocorrencia' %}checked{% endif %}>
+                                <label class="form-check-label" for="contagem_ocorrencia_alert">Por ocorrência (uma por valor na coluna)</label>
+                            </div>
+                            <small class="text-muted d-block ms-4">Várias linhas com o mesmo valor na coluna contam como 1.</small>
+                        </div>
+                    </div>
+                    <div id="coluna_ocorrencia_wrapper_alert" class="mt-3" style="display: {% if config and config.get_configuracoes_dict().get('contagem_por') == 'ocorrencia' %}block{% else %}none{% endif %};">
+                        <label for="coluna_ocorrencia" class="form-label">Coluna que identifica a ocorrência</label>
+                        <select class="form-select" id="coluna_ocorrencia" name="coluna_ocorrencia" style="max-width: 280px;">
+                            <option value="">Selecione...</option>
+                            {% for coluna in colunas %}
+                            <option value="{{ coluna }}" {% if (config and config.get_configuracoes_dict().get('coluna_ocorrencia') == coluna) or ((not config or not config.get_configuracoes_dict().get('coluna_ocorrencia')) and coluna == 'Ocorrência') %}selected{% endif %}>{{ coluna }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Padrão: Ocorrência. Ex.: 6 linhas com a mesma Ocorrência = 1 ocorrência.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configurações Personalizadas -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-gear"></i> Tipo de Verificação
+                        <button type="button" class="btn btn-sm btn-light float-end" id="btnAdicionarConfig">
+                            <i class="bi bi-plus"></i> Adicionar Verificação
+                        </button>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        Defina o tipo de análise/cálculo genérico que será aplicado na coluna de dados. 
+                        Exemplos: contar, contém, maior que, média, etc.
+                    </div>
+                    <div id="configContainer">
+                        {% if config %}
+                            {% set configs = config.get_configuracoes_dict() %}
+                            {% set ns = namespace(items=[]) %}
+                            {% for chave, valor in configs.items() %}
+                                {% if chave in tipos_verificacao_codigos %}
+                                    {% set _ = ns.items.append((chave, valor)) %}
+                                {% endif %}
+                            {% endfor %}
+                            {% for chave, valor in ns.items %}
+                            <div class="config-item mb-3 p-3 border rounded">
+                                <div class="row">
+                                    <div class="col-md-5">
+                                        <label class="form-label">Tipo de Verificação</label>
+                                        <select class="form-select config-chave" name="config_chave_{{ loop.index0 }}" required>
+                                            <option value="">Selecione...</option>
+                                            {% for codigo, rotulo in tipos_verificacao %}
+                                            <option value="{{ codigo }}" {% if chave == codigo %}selected{% endif %}>{{ rotulo }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Valor</label>
+                                        <input type="text" class="form-control config-valor" name="config_valor_{{ loop.index0 }}" 
+                                               value="{% if valor is iterable and valor is not string %}{{ valor | join(', ') }}{% else %}{{ valor }}{% endif %}" 
+                                               placeholder="Ex: 3 ou lista separada por vírgula">
+                                    </div>
+                                    <div class="col-md-1">
+                                        <label class="form-label">&nbsp;</label>
+                                        <button type="button" class="btn btn-danger w-100 btn-remover-config"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                    <input type="hidden" id="num_configs" name="num_configs" value="{% if config %}{{ ns.items | length }}{% else %}0{% endif %}">
+                </div>
+            </div>
+
+            <!-- Condições de filtro -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-funnel"></i> Condições de Filtro
+                        <button type="button" class="btn btn-sm btn-light float-end" id="btnAdicionarCondicao">
+                            <i class="bi bi-plus"></i> Adicionar Condição
+                        </button>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="condicoesContainer">
+                        {% if config %}
+                            {% set conds = config.get_condicoes_dict() %}
+                            {% for cond in conds %}
+                            <div class="condicao-item mb-3 p-3 border rounded">
+                                <div class="row align-items-end">
+                                    <div class="col-md-2 col-6">
+                                        <label class="form-label">Combinar com</label>
+                                        <select class="form-select form-select-sm condicao-conector" name="condicao_{{ loop.index0 }}_conector" {% if loop.index0 == 0 %}disabled{% endif %}>
+                                            <option value="and" {% if loop.index0 == 0 or (cond.conector or 'and') == 'and' %}selected{% endif %}>E (AND)</option>
+                                            <option value="or" {% if loop.index0 > 0 and cond.conector == 'or' %}selected{% endif %}>OU (OR)</option>
+                                            <option value="if" {% if loop.index0 > 0 and cond.conector == 'if' %}selected{% endif %}>SE (IF)</option>
+                                        </select>
+                                        {% if loop.index0 == 0 %}<input type="hidden" name="condicao_{{ loop.index0 }}_conector" value="and">{% endif %}
+                                    </div>
+                                    <div class="col-md-3 col-6">
+                                        <label class="form-label">Coluna</label>
+                                        <select class="form-select condicao-coluna" name="condicao_{{ loop.index0 }}_coluna" required>
+                                            <option value="">Selecione...</option>
+                                            {% for coluna in colunas %}
+                                            <option value="{{ coluna }}" {% if cond.coluna == coluna %}selected{% endif %}>{{ coluna }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">Operador</label>
+                                        <select class="form-select condicao-operador" name="condicao_{{ loop.index0 }}_operador">
+                                            <option value="==" {% if cond.operador == '==' %}selected{% endif %}>Igual (==)</option>
+                                            <option value="!=" {% if cond.operador == '!=' %}selected{% endif %}>Diferente (!=)</option>
+                                            <option value=">" {% if cond.operador == '>' %}selected{% endif %}>Maior (>)</option>
+                                            <option value="<" {% if cond.operador == '<' %}selected{% endif %}>Menor (<)</option>
+                                            <option value=">=" {% if cond.operador == '>=' %}selected{% endif %}>Maior ou Igual (>=)</option>
+                                            <option value="<=" {% if cond.operador == '<=' %}selected{% endif %}>Menor ou Igual (<=)</option>
+                                            <option value="contains" {% if cond.operador == 'contains' %}selected{% endif %}>Contém</option>
+                                            <option value="not contains" {% if cond.operador == 'not contains' %}selected{% endif %}>Não Contém</option>
+                                            <option value="is null" {% if cond.operador == 'is null' %}selected{% endif %}>É Nulo</option>
+                                            <option value="is not null" {% if cond.operador == 'is not null' %}selected{% endif %}>Não É Nulo</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Valor</label>
+                                        <select class="form-select condicao-valor condicao-valor-select" name="condicao_{{ loop.index0 }}_valor" data-valor-inicial="{{ cond.valor or '' }}">
+                                            <option value="">Selecione ou digite...</option>
+                                            {% if cond.valor %}<option value="{{ cond.valor }}" selected>{{ cond.valor }}</option>{% endif %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-1">
+                                        <label class="form-label">&nbsp;</label>
+                                        <button type="button" class="btn btn-danger w-100 btn-remover-condicao"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                    <input type="hidden" id="num_condicoes" name="num_condicoes" value="{% if config %}{{ config.get_condicoes_dict()|length }}{% else %}0{% endif %}">
+                    <div class="alert alert-info mt-3">
+                        <i class="bi bi-info-circle"></i> Em cada condição, escolha como ela se combina com a anterior: <strong>E (AND)</strong>, <strong>OU (OR)</strong> ou <strong>SE (IF)</strong>. A primeira condição não tem conector.
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-circle"></i> Salvar
+                </button>
+                <a href="{{ url_for('alertas.config') }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
+(function() {
+    var API_COLUNA_VALORES = "{{ url_for('indicadores.coluna_valores') }}";
+    function loadValoresAndInitSelect2($row) {
+        var $coluna = $row.find('.condicao-coluna');
+        var $valor = $row.find('.condicao-valor-select');
+        var col = ($coluna.val() || '').trim();
+        var currentVal = $valor.val() || $valor.data('valor-inicial') || '';
+        
+        // Inicializar Select2 no campo de coluna se ainda não estiver inicializado
+        if (!$coluna.data('select2')) {
+            $coluna.select2({
+                theme: 'bootstrap-5',
+                width: '100%',
+                placeholder: 'Selecione ou busque a coluna...',
+                allowClear: true
+            });
+        }
+        
+        if ($valor.data('select2')) { try { $valor.select2('destroy'); } catch(e) {} }
+        $valor.off('select2:select');
+        $valor.empty().append('<option value="">Selecione ou digite...</option>');
+        if (!col) {
+            $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Selecione ou digite...' });
+            return;
+        }
+        $.ajax({
+            url: API_COLUNA_VALORES,
+            data: { coluna: col },
+            dataType: 'json',
+            success: function(vals) {
+                if (!Array.isArray(vals)) vals = [];
+                $valor.empty().append('<option value="">Selecione ou digite...</option>');
+                vals.forEach(function(v) {
+                    var opt = $('<option></option>').attr('value', v).text(v);
+                    if (v === currentVal) opt.prop('selected', true);
+                    $valor.append(opt);
+                });
+                if (currentVal && $valor.find('option[value="' + currentVal.replace(/"/g,'\\"') + '"]').length === 0) {
+                    $valor.append($('<option></option>').attr('value', currentVal).text(currentVal).prop('selected', true));
+                }
+                $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Selecione ou digite...' });
+            },
+            error: function() {
+                $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Erro ao carregar.' });
+            }
+        });
+    }
+    $(document).ready(function() {
+        // Inicializar Select2 em todas as colunas existentes
+        $('.condicao-coluna').each(function() {
+            if (!$(this).data('select2')) {
+                $(this).select2({
+                    theme: 'bootstrap-5',
+                    width: '100%',
+                    placeholder: 'Selecione ou busque a coluna...',
+                    allowClear: true
+                });
+            }
+        });
+        
+        $('#condicoesContainer').on('change', '.condicao-coluna', function() {
+            loadValoresAndInitSelect2($(this).closest('.condicao-item'));
+        });
+        $('.condicao-item').each(function() {
+            loadValoresAndInitSelect2($(this));
+        });
+    });
+    window.loadValoresAndInitSelect2 = function(rowEl) {
+        var $r = (typeof jQuery !== 'undefined' && rowEl) ? (rowEl.jquery ? rowEl : jQuery(rowEl)) : null;
+        if ($r && $r.length) loadValoresAndInitSelect2($r);
+    };
+})();
+</script>
+<script>
+function atualizarCampos() {
+    var tipo = document.getElementById('tipo').value;
+    document.querySelectorAll('#configEspecifica > [id^="config_"]').forEach(function(el) {
+        el.style.display = (el.id === 'config_' + tipo) ? 'block' : 'none';
+    });
+}
+var contadorCondicoes = {{ config.get_condicoes_dict()|length if config else 0 }};
+var colunasList = {{ colunas | tojson }};
+var colunasOpts = (colunasList || []).map(function(c) { return '<option value="' + String(c).replace(/"/g, '&quot;').replace(/</g, '&lt;') + '">' + String(c).replace(/</g, '&lt;') + '</option>'; }).join('');
+document.getElementById('btnAdicionarCondicao').addEventListener('click', function() {
+    var container = document.getElementById('condicoesContainer');
+    var index = contadorCondicoes++;
+    var conectorOpts = '<option value="and">E (AND)</option><option value="or">OU (OR)</option><option value="if">SE (IF)</option>';
+    var html = '<div class="condicao-item mb-3 p-3 border rounded"><div class="row align-items-end">' +
+        '<div class="col-md-2 col-6"><label class="form-label">Combinar com</label><select class="form-select form-select-sm condicao-conector" name="condicao_' + index + '_conector">' + conectorOpts + '</select></div>' +
+        '<div class="col-md-3 col-6"><label class="form-label">Coluna</label><select class="form-select condicao-coluna" name="condicao_' + index + '_coluna" required><option value="">Selecione...</option>' + colunasOpts + '</select></div>' +
+        '<div class="col-md-2"><label class="form-label">Operador</label><select class="form-select condicao-operador" name="condicao_' + index + '_operador"><option value="==">Igual (==)</option><option value="!=">Diferente</option><option value=">">Maior</option><option value="<">Menor</option><option value=">=">>=</option><option value="<="><=</option><option value="contains">Contém</option><option value="not contains">Não Contém</option><option value="is null">É Nulo</option><option value="is not null">Não É Nulo</option></select></div>' +
+        '<div class="col-md-3"><label class="form-label">Valor</label><select class="form-select condicao-valor condicao-valor-select" name="condicao_' + index + '_valor"><option value="">Selecione ou digite...</option></select></div>' +
+        '<div class="col-md-1"><label class="form-label">&nbsp;</label><button type="button" class="btn btn-danger w-100 btn-remover-condicao"><i class="bi bi-trash"></i></button></div></div></div>';
+    container.insertAdjacentHTML('beforeend', html);
+    var num = document.querySelectorAll('#condicoesContainer .condicao-item').length;
+    document.getElementById('num_condicoes').value = num;
+    // Inicializar Select2 nos novos campos
+    var $lastItem = $(container).find('.condicao-item:last-child');
+    if ($lastItem.length) {
+        var $coluna = $lastItem.find('.condicao-coluna');
+        $coluna.select2({
+            theme: 'bootstrap-5',
+            width: '100%',
+            placeholder: 'Selecione ou busque a coluna...',
+            allowClear: true
+        });
+        if (window.loadValoresAndInitSelect2) {
+            window.loadValoresAndInitSelect2($lastItem[0]);
+        }
+    }
+});
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.btn-remover-condicao')) {
+        e.target.closest('.condicao-item').remove();
+        document.getElementById('num_condicoes').value = document.querySelectorAll('#condicoesContainer .condicao-item').length;
+    }
+});
+document.getElementById('formAlerta').addEventListener('submit', function() {
+    document.getElementById('num_condicoes').value = document.querySelectorAll('#condicoesContainer .condicao-item').length;
+    // Contar apenas configurações (excluindo coluna_dados que tem campo próprio)
+    document.getElementById('num_configs').value = document.querySelectorAll('#configContainer .config-item').length;
+});
+var tiposVerificacaoOpts = {% for codigo, rotulo in tipos_verificacao %}'<option value="{{ codigo }}">{{ rotulo }}</option>' + {% endfor %} '';
+// Inicializar contador de configurações
+var contadorConfigs = document.querySelectorAll('#configContainer .config-item').length;
+document.getElementById('btnAdicionarConfig').addEventListener('click', function() {
+    var container = document.getElementById('configContainer');
+    var index = contadorConfigs++;
+    var html = '<div class="config-item mb-3 p-3 border rounded"><div class="row">' +
+        '<div class="col-md-5"><label class="form-label">Tipo de Verificação</label><select class="form-select config-chave" name="config_chave_' + index + '" required><option value="">Selecione...</option>' + tiposVerificacaoOpts + '</select></div>' +
+        '<div class="col-md-6"><label class="form-label">Valor</label><input type="text" class="form-control config-valor" name="config_valor_' + index + '" placeholder="Ex: 3 ou lista separada por vírgula"></div>' +
+        '<div class="col-md-1"><label class="form-label">&nbsp;</label><button type="button" class="btn btn-danger w-100 btn-remover-config"><i class="bi bi-trash"></i></button></div></div></div>';
+    container.insertAdjacentHTML('beforeend', html);
+    document.getElementById('num_configs').value = document.querySelectorAll('#configContainer .config-item').length;
+});
+// Remover configuração
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.btn-remover-config')) {
+        e.target.closest('.config-item').remove();
+        document.getElementById('num_configs').value = document.querySelectorAll('#configContainer .config-item').length;
+    }
+});
+    // Inicializar Select2 para o campo de ícone com formatação customizada
+    $(document).ready(function() {
+        // Inicializar Select2 para Coluna de Dados com busca
+        $('#coluna_dados').select2({
+            theme: 'bootstrap-5',
+            width: '100%',
+            placeholder: 'Selecione ou busque a coluna onde buscar os dados...',
+            allowClear: true
+        });
+        
+        $('#icone').select2({
+        theme: 'bootstrap-5',
+        width: '100%',
+        templateResult: function(state) {
+            if (!state.id) {
+                return state.text;
+            }
+            var iconName = $(state.element).data('icon') || state.id;
+            var text = state.text || $(state.element).text();
+            var $icon = $('<span><i class="bi bi-' + iconName + ' me-2"></i>' + text + '</span>');
+            return $icon;
+        },
+        templateSelection: function(state) {
+            if (!state.id) {
+                return state.text;
+            }
+            var iconName = $(state.element).data('icon') || state.id;
+            var text = state.text || $(state.element).text();
+            var $icon = $('<span><i class="bi bi-' + iconName + ' me-2"></i>' + text + '</span>');
+            return $icon;
+        }
+    });
+    
+    // Inicializar Select2 para o campo de cor com formatação customizada
+    $('#cor').select2({
+        theme: 'bootstrap-5',
+        width: '100%',
+        templateResult: function(state) {
+            if (!state.id) {
+                return state.text;
+            }
+            var color = $(state.element).data('color') || state.id;
+            var text = state.text || $(state.element).text();
+            var $color = $('<span><span class="badge me-2" style="background-color: ' + color + '; width: 20px; height: 20px; display: inline-block; border-radius: 3px;"></span>' + text + '</span>');
+            return $color;
+        },
+        templateSelection: function(state) {
+            if (!state.id) {
+                return state.text;
+            }
+            var color = $(state.element).data('color') || state.id;
+            var text = state.text || $(state.element).text();
+            var $color = $('<span><span class="badge me-2" style="background-color: ' + color + '; width: 20px; height: 20px; display: inline-block; border-radius: 3px;"></span>' + text + '</span>');
+            return $color;
+        }
+    });
+    
+    // Mostrar/ocultar coluna de ocorrência conforme "Contabilizar"
+    document.querySelectorAll('input[name="contagem_por"]').forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            var wrapper = document.getElementById('coluna_ocorrencia_wrapper_alert');
+            wrapper.style.display = (this.value === 'ocorrencia') ? 'block' : 'none';
+        });
+    });
+    
+    // Mostrar/ocultar colunas conforme Tipo de Cálculo (igual aos indicadores)
+    function toggleCamposTipoCalculo() {
+        var tipo = document.getElementById('tipo_calculo').value;
+        var divTempo = document.getElementById('campos_tempo_alert');
+        var divNumerico = document.getElementById('campos_numerico_alert');
+        var divMeta = document.getElementById('campos_meta_alert');
+        var divAlertaCondicao = document.getElementById('campos_alerta_condicao');
+        var colunaDados = document.getElementById('coluna_dados');
+        var obrigatorioSpan = document.getElementById('coluna_dados_obrigatorio');
+        var usaTipoCalculo = ['diferenca_tempo', 'diferenca_ate_agora', 'contagem', 'media', 'soma', 'percentual_meta'].indexOf(tipo) >= 0;
+        if (tipo === 'diferenca_tempo' || tipo === 'percentual_meta' || tipo === 'diferenca_ate_agora') {
+            divTempo.style.display = 'block';
+            divNumerico.style.display = 'none';
+            divMeta.style.display = (tipo === 'percentual_meta') ? 'block' : 'none';
+            divAlertaCondicao.style.display = (tipo === 'diferenca_tempo' || tipo === 'diferenca_ate_agora') ? 'block' : 'none';
+            var colFimWrap = document.getElementById('coluna_fim_wrapper');
+            var labelInicio = document.getElementById('label_coluna_inicio');
+            var hintAteAgora = document.getElementById('hint_diferenca_ate_agora');
+            if (colFimWrap) colFimWrap.style.display = (tipo === 'diferenca_ate_agora') ? 'none' : 'block';
+            if (labelInicio) labelInicio.textContent = (tipo === 'diferenca_ate_agora') ? 'Data de referência (ex: Chegada no hospital)' : 'Coluna Data Início';
+            if (hintAteAgora) hintAteAgora.style.display = (tipo === 'diferenca_ate_agora') ? 'block' : 'none';
+        } else if (tipo === 'media' || tipo === 'soma') {
+            divTempo.style.display = 'none';
+            divNumerico.style.display = 'block';
+            divMeta.style.display = 'none';
+            divAlertaCondicao.style.display = 'block';
+        } else if (tipo === 'contagem') {
+            divTempo.style.display = 'none';
+            divNumerico.style.display = 'none';
+            divMeta.style.display = 'none';
+            divAlertaCondicao.style.display = 'block';
+        } else {
+            divTempo.style.display = 'none';
+            divNumerico.style.display = 'none';
+            divMeta.style.display = 'none';
+            divAlertaCondicao.style.display = 'none';
+        }
+        colunaDados.required = !usaTipoCalculo;
+        if (obrigatorioSpan) obrigatorioSpan.style.display = usaTipoCalculo ? 'none' : 'inline';
+        var alertaValor = document.getElementById('alerta_valor');
+        if (alertaValor) alertaValor.required = ['diferenca_tempo', 'diferenca_ate_agora', 'contagem', 'media', 'soma'].indexOf(tipo) >= 0;
+    }
+    document.getElementById('tipo_calculo').addEventListener('change', toggleCamposTipoCalculo);
+    toggleCamposTipoCalculo(); // Estado inicial ao carregar
+    
+    // Select2 para coluna_data_inicio, coluna_data_fim, coluna_numerica_alert
+    $('#coluna_data_inicio, #coluna_data_fim, #coluna_numerica_alert').select2({
+        theme: 'bootstrap-5',
+        width: '100%',
+        placeholder: 'Selecione...',
+        allowClear: true
+    });
+    
+    // Inicializar contador de configurações ao carregar
+    var contadorConfigsInicial = document.querySelectorAll('#configContainer .config-item').length;
+    document.getElementById('num_configs').value = contadorConfigsInicial;
+});
+</script>
+{% endblock %}

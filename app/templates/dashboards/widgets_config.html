@@ -1,0 +1,515 @@
+{% extends "base.html" %}
+
+{% block title %}Configurar Widgets - {{ dashboard.nome }} - Sistema SAMU{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Mesmo layout da página /dashboards/widgets/<id> */
+.widgets-config-fullpage {
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+    margin-top: -1rem;
+    margin-bottom: 0;
+    padding: 0;
+}
+.widgets-config-preview-viewport {
+    --bg-primary: {% if dashboard.cor_tema == 'dark' %}#000000{% else %}#f5f5f7{% endif %};
+    --bg-card: {% if dashboard.cor_tema == 'dark' %}#2c2c2e{% else %}#ffffff{% endif %};
+    --text-primary: {% if dashboard.cor_tema == 'dark' %}#ffffff{% else %}#000000{% endif %};
+    --text-secondary: {% if dashboard.cor_tema == 'dark' %}#8e8e93{% else %}#6c6c70{% endif %};
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 300px;
+    overflow: hidden;
+}
+.widgets-config-preview-viewport .widgets-preview-header {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    min-height: 48px;
+}
+.widgets-config-preview-viewport .widgets-preview-header h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0;
+}
+.widgets-config-preview-viewport .widgets-preview-header a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 15px;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+.widgets-config-preview-viewport .widgets-preview-header a:hover {
+    background: {% if dashboard.cor_tema == 'dark' %}rgba(255,255,255,0.1){% else %}rgba(0,0,0,0.05){% endif %};
+    color: var(--text-primary);
+}
+.widgets-preview-area {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+#widgetsGridLines {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    right: 15px;
+    bottom: 15px;
+    display: grid;
+    pointer-events: none;
+    z-index: 0;
+}
+#widgetsGridLines .grid-line-cell {
+    border-right: 1px dashed rgba(255,255,255,0.25);
+    border-bottom: 1px dashed rgba(255,255,255,0.25);
+}
+.widgets-config-preview-viewport.theme-light #widgetsGridLines .grid-line-cell {
+    border-color: rgba(0,0,0,0.12);
+}
+#widgetsPreview {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    z-index: 1;
+    display: grid;
+    {% if widgets_grid_template == 'auto' %}
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    {% elif widgets_grid_template == '2col' %}
+    grid-template-columns: repeat(2, 1fr);
+    {% elif widgets_grid_template == '3col' %}
+    grid-template-columns: repeat(3, 1fr);
+    {% elif widgets_grid_template == '4col' %}
+    grid-template-columns: repeat(4, 1fr);
+    {% elif widgets_grid_template == 'custom' %}
+    grid-template-columns: repeat({{ widgets_colunas }}, 1fr);
+    {% elif widgets_grid_template == 'masonry' %}
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    grid-auto-rows: 10px;
+    {% else %}
+    grid-template-columns: repeat({{ widgets_colunas }}, 1fr);
+    {% endif %}
+    {% if widgets_linhas %}
+    grid-template-rows: repeat({{ widgets_linhas }}, 1fr);
+    {% else %}
+    grid-template-rows: repeat(2, 1fr);
+    {% endif %}
+    gap: 15px;
+    width: 100%;
+    padding: 15px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.widget-preview-item {
+    background: var(--bg-card);
+    border-radius: 20px;
+    padding: 18px;
+    border: 2px solid rgba(0,123,255,0.5);
+    {% if widgets_grid_template != 'masonry' %}
+    aspect-ratio: 1;
+    {% endif %}
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: move;
+    min-height: 0;
+}
+.widget-preview-item[data-col-span="2"] { grid-column: span 2; }
+.widget-preview-item[data-col-span="3"] { grid-column: span 3; }
+.widget-preview-item[data-col-span="4"] { grid-column: span 4; }
+.widget-preview-item[data-linha-span="2"] {
+    grid-row: span 2;
+    aspect-ratio: unset;
+    min-height: 0;
+    height: 100%;
+}
+.widget-preview-item[data-linha-span="3"] {
+    grid-row: span 3;
+    aspect-ratio: unset;
+    min-height: 0;
+    height: 100%;
+}
+.widget-preview-item[data-linha-span="4"] {
+    grid-row: span 4;
+    aspect-ratio: unset;
+    min-height: 0;
+    height: 100%;
+}
+.widget-preview-item:hover {
+    box-shadow: {% if dashboard.cor_tema == 'dark' %}0 10px 40px rgba(0,0,0,0.4){% else %}0 10px 30px rgba(0,0,0,0.15){% endif %};
+}
+.widget-preview-item .widget-preview-nome { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.widget-preview-item .widget-preview-meta { font-size: 11px; color: var(--text-secondary); margin-top: auto; padding-top: 8px; }
+.widget-order-controls { display: flex; align-items: center; gap: 2px; }
+.widget-order-controls .btn { padding: 2px 6px; font-size: 12px; line-height: 1; }
+.widget-drag-handle { cursor: grab; color: var(--text-secondary); padding: 2px; }
+.widget-drag-handle:active { cursor: grabbing; }
+.widget-preview-item.sortable-ghost { opacity: 0.4; }
+.widget-preview-item.sortable-chosen { box-shadow: 0 4px 12px rgba(0,123,255,0.3); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="widgets-config-fullpage">
+    <div class="widgets-config-toolbar" id="widgetsConfigToolbar" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;padding:0.5rem 1rem;background:#f8f9fa;border-bottom:1px solid #dee2e6;">
+        <span class="text-muted small"><i class="bi bi-sliders"></i> Configurar Widgets — Arraste para reordenar, ↑↓ ou engrenagem para tamanho. Edite colunas/linhas para ajustar o grid.</span>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <label class="d-flex align-items-center gap-1 small">
+                Colunas: <input type="number" id="inputColunas" min="1" max="8" value="{{ widgets_colunas }}" class="form-control form-control-sm" style="width:60px;" onchange="definirTemplatePorColunas(); atualizarGridLayout()">
+            </label>
+            <label class="d-flex align-items-center gap-1 small">
+                Linhas: <input type="number" id="inputLinhas" min="1" max="12" value="{{ widgets_linhas or 2 }}" class="form-control form-control-sm" style="width:60px;" onchange="atualizarGridLayout()" placeholder="2">
+            </label>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="aplicarTemplate('2col')">2 col</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="aplicarTemplate('3col')">3 col</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="aplicarTemplate('4col')">4 col</button>
+            <a href="{{ url_for('dashboards.widgets', id=dashboard.id) }}" class="btn btn-primary btn-sm"><i class="bi bi-eye"></i> Visualizar</a>
+            <a href="{{ url_for('dashboards.edit', id=dashboard.id) }}" class="btn btn-secondary btn-sm"><i class="bi bi-arrow-left"></i> Voltar</a>
+            <button type="button" class="btn btn-success btn-sm" onclick="salvarConfiguracao()"><i class="bi bi-save"></i> Salvar</button>
+        </div>
+    </div>
+    <div class="widgets-config-preview-viewport {% if dashboard.cor_tema == 'light' %}theme-light{% endif %}" id="widgetsConfigPreviewViewport">
+        <div class="widgets-preview-header">
+            <h1>{{ dashboard.nome }}</h1>
+            <div>
+                <a href="{{ url_for('dashboards.widgets', id=dashboard.id) }}"><i class="bi bi-eye"></i> Visualizar</a>
+                <a href="{{ url_for('dashboards.view', id=dashboard.id) }}"><i class="bi bi-list"></i> Visualização Lista</a>
+            </div>
+        </div>
+        <div class="widgets-preview-area">
+        <div id="widgetsGridLines" aria-hidden="true"></div>
+        <div id="widgetsPreview" class="widgets-preview-grid"
+             data-colunas="{{ widgets_colunas }}"
+             data-linhas="{{ widgets_linhas or 2 }}"
+             data-template="{{ widgets_grid_template }}">
+            {% if indicadores_com_config %}
+            {% for item in indicadores_com_config %}
+            {% set indicador = item.indicador %}
+            {% set config = item.config %}
+            {% set col_span = config.get('coluna_span', 1) %}
+            {% set linha_span = config.get('linha_span', 1) %}
+            {% set grafico_alt = config.get('grafico_altura', 80) %}
+            <div class="widget-preview-item" 
+                 data-indicador-id="{{ indicador.id }}"
+                 data-col-span="{{ col_span }}"
+                 data-linha-span="{{ linha_span }}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-1">
+                        <span class="widget-drag-handle" title="Arrastar para reordenar"><i class="bi bi-grip-vertical"></i></span>
+                        <span class="widget-preview-nome">{{ indicador.nome|truncate(15) }}</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-1">
+                        <div class="widget-order-controls">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation();moverWidget({{ indicador.id }}, -1);" title="Mover para cima"><i class="bi bi-chevron-up"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation();moverWidget({{ indicador.id }}, 1);" title="Mover para baixo"><i class="bi bi-chevron-down"></i></button>
+                        </div>
+                        <button type="button" class="btn btn-sm p-0 border-0 bg-transparent" style="color:var(--text-secondary);" onclick="event.stopPropagation();configurarWidget({{ indicador.id }});" title="Configurar tamanho"><i class="bi bi-gear"></i></button>
+                    </div>
+                </div>
+                <div class="widget-preview-meta">Colunas: {{ col_span }} · Linhas: {{ linha_span }} · Gráfico: {{ grafico_alt }}px</div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="alert alert-warning m-3" style="grid-column: 1 / -1;">
+                <i class="bi bi-exclamation-triangle"></i> Nenhum indicador configurado neste dashboard.
+            </div>
+            {% endif %}
+        </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para configurar widget individual -->
+<div class="modal fade" id="widgetConfigModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Configurar Widget</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="modalIndicadorId">
+                <div class="mb-3">
+                    <label for="modalColSpan" class="form-label">Colunas (Span)</label>
+                    <input type="number" class="form-control" id="modalColSpan" min="1" max="4" value="1">
+                    <small class="form-text text-muted">Quantas colunas o widget ocupa (1-4)</small>
+                </div>
+                <div class="mb-3">
+                    <label for="modalLinhaSpan" class="form-label">Linhas (Span)</label>
+                    <input type="number" class="form-control" id="modalLinhaSpan" min="1" max="4" value="1">
+                    <small class="form-text text-muted">Quantas linhas o widget ocupa (1-4)</small>
+                </div>
+                <div class="mb-3">
+                    <label for="modalGraficoAltura" class="form-label">Altura do Gráfico (px)</label>
+                    <input type="number" class="form-control" id="modalGraficoAltura" min="60" max="200" value="80">
+                    <small class="form-text text-muted">Altura do gráfico em pixels (60-200)</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="aplicarConfiguracaoWidget()">Aplicar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let widgetsConfig = {};
+let currentWidgetId = null;
+
+function atualizarAlturaPreview() {
+    const toolbar = document.getElementById('widgetsConfigToolbar');
+    const viewport = document.getElementById('widgetsConfigPreviewViewport');
+    if (!toolbar || !viewport) return;
+    const bottomToolbar = toolbar.getBoundingClientRect().bottom;
+    const disponivel = (window.innerHeight || document.documentElement.clientHeight) - bottomToolbar - 8;
+    viewport.style.height = Math.max(300, disponivel) + 'px';
+}
+
+function getTemplateAtual() {
+    const grid = document.getElementById('widgetsPreview');
+    return grid?.dataset?.template || '{{ widgets_grid_template or "auto" }}';
+}
+
+function definirTemplatePorColunas() {
+    const colunas = parseInt(document.getElementById('inputColunas')?.value || '3', 10);
+    const grid = document.getElementById('widgetsPreview');
+    if (!grid) return;
+    const t = colunas === 2 ? '2col' : (colunas === 3 ? '3col' : (colunas === 4 ? '4col' : 'custom'));
+    grid.dataset.template = t;
+}
+
+function atualizarGridLinhas() {
+    const colunas = parseInt(document.getElementById('inputColunas')?.value || '3', 10);
+    const linhas = parseInt(document.getElementById('inputLinhas')?.value || '2', 10);
+    const template = getTemplateAtual();
+    const gridLines = document.getElementById('widgetsGridLines');
+    const grid = document.getElementById('widgetsPreview');
+    if (!gridLines || !grid) return;
+    
+    const cols = template === '2col' ? 2 : (template === '3col' ? 3 : (template === '4col' ? 4 : colunas));
+    const rows = linhas;
+    
+    gridLines.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    gridLines.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    gridLines.style.gap = '15px';
+    
+    const total = cols * rows;
+    let html = '';
+    for (let i = 0; i < total; i++) {
+        html += '<div class="grid-line-cell"></div>';
+    }
+    gridLines.innerHTML = html;
+}
+
+function atualizarGridLayout() {
+    const colunas = parseInt(document.getElementById('inputColunas')?.value || '3', 10);
+    const linhas = parseInt(document.getElementById('inputLinhas')?.value || '2', 10);
+    const template = getTemplateAtual();
+    const grid = document.getElementById('widgetsPreview');
+    if (!grid) return;
+    
+    const cols = template === '2col' ? 2 : (template === '3col' ? 3 : (template === '4col' ? 4 : Math.max(1, colunas)));
+    const rows = Math.max(1, linhas);
+    
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    grid.dataset.colunas = cols;
+    grid.dataset.linhas = rows;
+    
+    atualizarGridLinhas();
+}
+
+// Inicializar configurações
+document.addEventListener('DOMContentLoaded', function() {
+    {% for item in indicadores_com_config %}
+    widgetsConfig[{{ item.indicador.id }}] = {
+        indicador_id: {{ item.indicador.id }},
+        ordem: {{ item.config.get('ordem', item.indicador.ordem) }},
+        coluna_span: {{ item.config.get('coluna_span', 1) }},
+        linha_span: {{ item.config.get('linha_span', 1) }},
+        grafico_altura: {{ item.config.get('grafico_altura', 80) }},
+        posicao_x: {{ item.config.get('posicao_x') or 'null' }},
+        posicao_y: {{ item.config.get('posicao_y') or 'null' }}
+    };
+    {% endfor %}
+    
+    atualizarAlturaPreview();
+    window.addEventListener('resize', atualizarAlturaPreview);
+    
+    atualizarGridLayout();
+    
+    // Tornar widgets arrastáveis (filter exclui botões para não conflitar com cliques)
+    const previewEl = document.getElementById('widgetsPreview');
+    if (previewEl) {
+        window.sortableWidgets = new Sortable(previewEl, {
+            animation: 150,
+            forceFallback: true,
+            filter: 'button, .btn, .widget-order-controls',
+            preventOnFilter: false,
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            draggable: '.widget-preview-item',
+            onEnd: function(evt) {
+                atualizarOrdemFromDOM();
+            }
+        });
+    }
+});
+
+function atualizarOrdemFromDOM() {
+    const items = document.querySelectorAll('.widget-preview-item');
+    items.forEach((item, index) => {
+        const indicadorId = parseInt(item.dataset.indicadorId);
+        if (widgetsConfig[indicadorId]) {
+            widgetsConfig[indicadorId].ordem = index;
+        }
+    });
+}
+
+function moverWidget(indicadorId, direcao) {
+    const container = document.getElementById('widgetsPreview');
+    const items = Array.from(container.querySelectorAll('.widget-preview-item'));
+    const idx = items.findIndex(el => parseInt(el.dataset.indicadorId) === indicadorId);
+    if (idx < 0) return;
+    const novoIdx = idx + direcao;
+    if (novoIdx < 0 || novoIdx >= items.length) return;
+    
+    // Mover no DOM
+    const item = items[idx];
+    const alvo = items[novoIdx];
+    if (direcao < 0) {
+        container.insertBefore(item, alvo);
+    } else {
+        container.insertBefore(item, alvo.nextSibling);
+    }
+    atualizarOrdemFromDOM();
+}
+
+function configurarWidget(indicadorId) {
+    currentWidgetId = indicadorId;
+    const config = widgetsConfig[indicadorId] || {
+        coluna_span: 1,
+        linha_span: 1,
+        grafico_altura: 80,
+        ordem: 0
+    };
+    
+    document.getElementById('modalIndicadorId').value = indicadorId;
+    document.getElementById('modalColSpan').value = config.coluna_span || 1;
+    document.getElementById('modalLinhaSpan').value = config.linha_span || 1;
+    document.getElementById('modalGraficoAltura').value = config.grafico_altura || 80;
+    
+    const modal = new bootstrap.Modal(document.getElementById('widgetConfigModal'));
+    modal.show();
+}
+
+function aplicarConfiguracaoWidget() {
+    const indicadorId = parseInt(document.getElementById('modalIndicadorId').value);
+    const colSpan = parseInt(document.getElementById('modalColSpan').value);
+    const linhaSpan = parseInt(document.getElementById('modalLinhaSpan').value);
+    const graficoAltura = parseInt(document.getElementById('modalGraficoAltura').value);
+    
+    if (!widgetsConfig[indicadorId]) {
+        widgetsConfig[indicadorId] = { indicador_id: indicadorId, ordem: 0 };
+    }
+    
+    widgetsConfig[indicadorId].coluna_span = colSpan;
+    widgetsConfig[indicadorId].linha_span = linhaSpan;
+    widgetsConfig[indicadorId].grafico_altura = graficoAltura;
+    
+    const item = document.querySelector(`.widget-preview-item[data-indicador-id="${indicadorId}"]`);
+    if (item) {
+        item.dataset.colSpan = colSpan;
+        item.dataset.linhaSpan = linhaSpan;
+        var meta = item.querySelector('.widget-preview-meta');
+        if (meta) meta.textContent = 'Colunas: ' + colSpan + ' · Linhas: ' + linhaSpan + ' · Gráfico: ' + graficoAltura + 'px';
+    }
+    
+    bootstrap.Modal.getInstance(document.getElementById('widgetConfigModal')).hide();
+}
+
+function aplicarTemplate(template) {
+    const grid = document.getElementById('widgetsPreview');
+    const colunas = template === '2col' ? 2 : (template === '3col' ? 3 : 4);
+    const linhas = parseInt(document.getElementById('inputLinhas')?.value || grid.dataset.linhas || '2', 10);
+    
+    document.getElementById('inputColunas').value = colunas;
+    grid.dataset.template = template;
+    grid.style.gridTemplateColumns = `repeat(${colunas}, 1fr)`;
+    grid.style.gridTemplateRows = `repeat(${Math.max(1, linhas)}, 1fr)`;
+    grid.dataset.colunas = colunas;
+    
+    Object.keys(widgetsConfig).forEach(indicadorId => {
+        widgetsConfig[indicadorId].coluna_span = 1;
+        widgetsConfig[indicadorId].linha_span = 1;
+        const item = document.querySelector(`[data-indicador-id="${indicadorId}"]`);
+        if (item) {
+            item.style.gridColumn = 'span 1';
+            item.style.gridRow = 'span 1';
+            item.dataset.colSpan = '1';
+            item.dataset.linhaSpan = '1';
+            const q = item.querySelector('.widget-preview-meta');
+            if (q) q.textContent = 'Colunas: 1 · Linhas: 1 · Gráfico: ' + (widgetsConfig[indicadorId].grafico_altura || 80) + 'px';
+        }
+    });
+    atualizarGridLinhas();
+}
+
+
+function salvarConfiguracao() {
+    const widgetsArray = Object.values(widgetsConfig);
+    const colunas = parseInt(document.getElementById('inputColunas')?.value || '3', 10);
+    const linhasInput = document.getElementById('inputLinhas');
+    const linhas = linhasInput && linhasInput.value ? parseInt(linhasInput.value, 10) : null;
+    const template = getTemplateAtual();
+    
+    fetch('{{ url_for("dashboards.widgets_config", id=dashboard.id) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            widgets: widgetsArray,
+            grid_colunas: colunas,
+            grid_linhas: linhas,
+            grid_template: template
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Configuração salva com sucesso!');
+            window.location.reload();
+        } else {
+            alert('Erro ao salvar: ' + (data.error || 'Erro desconhecido'));
+        }
+    })
+    .catch(error => {
+        console.error('Erro:', error);
+        alert('Erro ao salvar configuração');
+    });
+}
+</script>
+{% endblock %}
