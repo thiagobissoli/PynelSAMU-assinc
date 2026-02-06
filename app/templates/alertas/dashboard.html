@@ -3,6 +3,7 @@
 {% block title %}Dashboard de Alertas{% endblock %}
 
 {% block extra_head %}
+<script src="/socket.io/socket.io.js"></script>
 <style>
 /* Tema Dark/Light - igual aos dashboards */
 .alertas-dashboard-wrap {
@@ -120,10 +121,10 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
 </div>
 
 <!-- Lista de Alertas -->
-<div class="list-group">
+<div class="list-group" id="listaAlertasDashboard" data-transparencia="{{ (config_sistema.transparencia_alerta if config_sistema and config_sistema.transparencia_alerta is not none else 20) | transparencia_hex }}">
     {% if alertas %}
         {% for alerta in alertas %}
-        <div class="list-group-item list-group-item-action mb-2 border rounded shadow-sm"
+        <div class="list-group-item list-group-item-action mb-2 border rounded shadow-sm alerta-item-dashboard" data-alerta-id="{{ alerta.id }}"
              style="background-color: {{ (alerta.cor_tipo or '#ff3b30') + ((config_sistema.transparencia_alerta if config_sistema and config_sistema.transparencia_alerta is not none else 20) | transparencia_hex) }} !important; border-left: 4px solid {{ alerta.cor_tipo or '#ff3b30' }} !important;">
             <div class="row g-2 align-items-start">
                 <div class="col-12 col-md-4">
@@ -146,8 +147,8 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
                         {% endif %}
                         {% endif %}
                     </div>
-                    <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0">
-                        <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="Resolver">
+                    <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="{{ alerta.id }}" data-origem="{{ alerta.origem or 'automatico' }}">
+                        <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="{{ 'Resolver' if alerta.origem == 'manual' else 'Alerta automático - só some pelas configurações' }}">
                             <span class="fw-bold">{{ 'M' if alerta.nome_tipo == 'Manual' else 'A' }}</span>
                         </button>
                     </form>
@@ -258,5 +259,96 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
 })();
 
 setTimeout(function() { location.reload(); }, 300000);
+
+// Resolver alerta via AJAX (evita reload, SocketIO propaga para outras telas)
+// Alerta automático: botão não executa, só some pelas configurações
+document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form && form.classList && form.classList.contains('form-resolver-alerta')) {
+        e.preventDefault();
+        if (form.getAttribute('data-origem') === 'automatico') return;
+        var alertaId = form.getAttribute('data-alerta-id');
+        var btn = form.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = true;
+        var fd = new FormData(form);
+        fd.append('X-Requested-With', 'XMLHttpRequest');
+        fetch(form.action, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }).catch(function() { return { ok: false, json: {} }; }); })
+            .then(function(res) {
+                if (res.ok && res.json && res.json.success) {
+                    var item = document.querySelector('.alerta-item-dashboard[data-alerta-id="' + alertaId + '"]');
+                    if (item) {
+                        item.style.transition = 'opacity 0.3s';
+                        item.style.opacity = '0';
+                        setTimeout(function() {
+                            item.remove();
+                            var list = document.getElementById('listaAlertasDashboard');
+                            if (list && list.querySelectorAll('.alerta-item-dashboard').length === 0) {
+                                var empty = list.querySelector('.alert-info');
+                                if (!empty) {
+                                    empty = document.createElement('div');
+                                    empty.className = 'alert alert-info';
+                                    empty.innerHTML = '<i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.';
+                                    list.appendChild(empty);
+                                }
+                            }
+                        }, 300);
+                    }
+                }
+            })
+            .catch(function() {})
+            .finally(function() { if (btn) btn.disabled = false; });
+    }
+});
+
+// WebSocket: alertas em tempo real (recebe de outras telas)
+(function() {
+    var list = document.getElementById('listaAlertasDashboard');
+    if (!list) return;
+    try {
+        var socket = io();
+        socket.emit('join_alertas');
+        socket.on('alerta_atualizado', function(data) {
+            if (!data || !data.acao) return;
+            var aid = data.alerta_id || (data.alerta && data.alerta.id);
+            if (data.acao === 'resolvido' || data.acao === 'arquivado') {
+                var item = document.querySelector('.alerta-item-dashboard[data-alerta-id="' + aid + '"]');
+                if (item) {
+                    item.style.transition = 'opacity 0.3s';
+                    item.style.opacity = '0';
+                    setTimeout(function() {
+                        item.remove();
+                        if (list.querySelectorAll('.alerta-item-dashboard').length === 0) {
+                            var empty = list.querySelector('.alert-info');
+                            if (!empty) {
+                                empty = document.createElement('div');
+                                empty.className = 'alert alert-info';
+                                empty.innerHTML = '<i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.';
+                                list.appendChild(empty);
+                            }
+                        }
+                    }, 300);
+                }
+            } else if (data.acao === 'criado' && data.alerta) {
+                var a = data.alerta;
+                var transp = list.getAttribute('data-transparencia') || '33';
+                var cor = a.tipo_alerta_icone ? (a.tipo_alerta_cor || '#ff3b30') : '#6c757d';
+                var tituloExib = (a.titulo || '').indexOf(' - ') >= 0 ? (a.titulo || '').split(' - ')[0] : (a.titulo || '');
+                var html = '<div class="list-group-item list-group-item-action mb-2 border rounded shadow-sm alerta-item-dashboard" data-alerta-id="' + a.id + '" style="background-color:' + (a.tipo_alerta_cor || '#ff3b30') + transp + ' !important; border-left: 4px solid ' + (a.tipo_alerta_cor || '#ff3b30') + ' !important;">' +
+                    '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
+                    '<i class="bi bi-' + (a.tipo_alerta_icone || 'exclamation-triangle') + ' me-2 flex-shrink-0" style="color:' + (a.tipo_alerta_cor || '#ff3b30') + '; font-size: 1.5rem;"></i>' +
+                    '<div><h4 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h4>' +
+                    '<small class="alerta-datetime text-muted d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                    '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center alerta-conteudo-direita"><div><p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
+                    '<form method="POST" action="/alertas/resolver/' + a.id + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual"><button type="submit" class="btn btn-sm rounded-circle btn-success" title="Resolver"><span class="fw-bold">M</span></button></form></div></div></div>';
+                var empty = list.querySelector('.alert-info');
+                if (empty) empty.remove();
+                var div = document.createElement('div');
+                div.innerHTML = html.trim();
+                list.insertBefore(div.firstChild, list.firstChild);
+            }
+        });
+    } catch (e) { console.warn('SocketIO alertas:', e); }
+})();
 </script>
 {% endblock %}

@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from app.config import Config
+from app.socketio_alertas import socketio
 import logging
 
 db = SQLAlchemy()
@@ -174,8 +175,27 @@ def create_app():
         except Exception as e:
             logging.getLogger(__name__).warning("Migração configuracao_alertas_sistema: %s", e)
         
+        # Migração: dashboard_configuracao_alerta e alerta.dashboard_id
+        try:
+            from sqlalchemy import inspect, text
+            db.create_all()
+            insp = inspect(db.engine)
+            if 'alerta' in insp.get_table_names():
+                cols = [c['name'] for c in insp.get_columns('alerta')]
+                if 'dashboard_id' not in cols:
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE alerta ADD COLUMN dashboard_id INTEGER REFERENCES dashboard(id)"))
+                        conn.commit()
+            if 'dashboard_configuracao_alerta' not in insp.get_table_names():
+                db.create_all()
+        except Exception as e:
+            logging.getLogger(__name__).warning("Migração dashboard alertas: %s", e)
+        
         # Iniciar scheduler de downloads automáticos
         from app.download_scheduler import iniciar_scheduler
         iniciar_scheduler(app)
+    
+    # Registrar handlers do SocketIO
+    socketio.init_app(app)
     
     return app

@@ -484,50 +484,8 @@ def testar():
 
 @bp_indicadores.route('/grafico/<int:id>')
 def grafico(id):
-    """Retorna dados do gráfico de um indicador (API)
-    
-    Query params opcionais:
-        - horas: Número de horas para o gráfico (sobrescreve config do indicador)
-        - intervalo: Intervalo em minutos entre pontos (sobrescreve config do indicador)
-    
-    O gráfico usa a média móvel configurada no indicador (filtro_ultimas_horas).
-    Cada ponto representa a média dos dados das últimas X horas.
-    Se grafico_historico_habilitado, retorna objeto com atual, historico e historico_cor.
-    """
+    """Retorna dados do gráfico de um indicador (API) - usa cache."""
     indicador = Indicador.query.get_or_404(id)
-    
-    from app.calculo_indicadores import gerar_dados_grafico
-    
-    # Usar SEMPRE os valores configurados no indicador
-    horas = indicador.grafico_ultimas_horas or 24  # Período do gráfico
-    intervalo = indicador.grafico_intervalo_minutos or 60  # Intervalo entre pontos
-    janela_media = indicador.filtro_ultimas_horas or 2  # Média móvel
-    
-    logger.info(f"Gerando gráfico: indicador={id}, período={horas}h, intervalo={intervalo}min, média_móvel={janela_media}h")
-    
-    dados = gerar_dados_grafico(indicador, horas=horas, intervalo_minutos=intervalo)
-    
-    tem_historico = indicador.grafico_historico_habilitado and indicador.grafico_historico_dados
-    tem_meta = indicador.grafico_meta_habilitado and indicador.grafico_meta_valor is not None
-    
-    if tem_historico or tem_meta:
-        resp = {'atual': dados}
-        if tem_historico:
-            from datetime import datetime
-            mes_atual = datetime.now().month
-            hist = indicador.get_historico_dados_mes(mes_atual)
-            valores_historico = []
-            for d in dados:
-                label = d.get('label', '')
-                hora = label.split(':')[0] if ':' in label else label[:2].zfill(2)
-                val = hist.get(hora)
-                valores_historico.append(float(val) if val is not None else None)
-            resp['historico'] = valores_historico
-            resp['historico_cor'] = indicador.grafico_historico_cor or '#6c757d'
-        if tem_meta:
-            resp['meta'] = [float(indicador.grafico_meta_valor)] * len(dados)
-            resp['meta_cor'] = indicador.grafico_meta_cor or '#ffc107'
-            resp['meta_estilo'] = indicador.grafico_meta_estilo or 'dashed'
-        return jsonify(resp)
-    
-    return jsonify(dados)
+    from app.cache_indicadores import get_or_calc_grafico
+    resp = get_or_calc_grafico(indicador)
+    return jsonify(resp)

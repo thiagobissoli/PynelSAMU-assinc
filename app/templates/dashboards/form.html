@@ -61,6 +61,43 @@
                 </div>
             </div>
             
+            <!-- Alertas -->
+            <div class="card mt-4">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="bi bi-bell"></i> Alertas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="incluir_alertas" name="incluir_alertas" 
+                                   {% if dashboard and dashboard.incluir_alertas or (not dashboard and request.form.get('incluir_alertas')) %}checked{% endif %}>
+                            <label class="form-check-label" for="incluir_alertas">
+                                <strong>Incluir painel de alertas na visualização lista</strong>
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">Exibe painel de alertas ao lado dos indicadores.</small>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label">Tipos de alerta automático a exibir</label>
+                        <small class="form-text text-muted d-block">Marque os tipos que deseja exibir. Alertas manuais sempre aparecem.</small>
+                        {% if configuracoes_alerta %}
+                        <div class="mt-2" style="max-height: 180px; overflow-y: auto;">
+                            {% for cfg in configuracoes_alerta %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="alertas_config" value="{{ cfg.id }}" id="alerta_cfg_{{ cfg.id }}"
+                                       {% if dashboard and cfg in dashboard.alertas_config %}checked{% endif %}>
+                                <label class="form-check-label" for="alerta_cfg_{{ cfg.id }}">{{ cfg.nome }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <small class="form-text text-muted">Marque os que estiverem ativos. Desmarcados = não exibidos.</small>
+                        {% else %}
+                        <p class="text-muted small mb-0">Nenhuma configuração de alerta disponível.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
             <!-- Configuração de Widgets -->
             {% if dashboard %}
             <div class="card mt-4">
@@ -104,16 +141,6 @@
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="incluir_alertas" name="incluir_alertas" 
-                                   {% if dashboard and dashboard.incluir_alertas %}checked{% endif %}>
-                            <label class="form-check-label" for="incluir_alertas">
-                                <strong>Incluir dashboard de alertas na visualização lista</strong>
-                            </label>
-                        </div>
-                        <small class="form-text text-muted">Na visão lista: lado esquerdo = indicadores, lado direito = alertas (sem gráfico grande).</small>
-                    </div>
                     <div class="alert alert-info mb-0">
                         <i class="bi bi-info-circle"></i>
                         <strong>Dica:</strong> Após salvar, você pode configurar tamanhos e posições individuais de cada widget 

@@ -257,6 +257,11 @@ def processar_arquivos_baixados(arquivo_especifico=None):
             except Exception as e:
                 logger.warning(f"⚠️  Erro ao deletar: {e}")
             
+            try:
+                from app.cache_indicadores import invalidate_cache
+                invalidate_cache()
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"❌ Erro ao converter: {e}")
@@ -284,6 +289,11 @@ def processar_arquivos_baixados(arquivo_especifico=None):
             except Exception as e:
                 logger.warning(f"⚠️  Erro ao deletar: {e}")
             
+            try:
+                from app.cache_indicadores import invalidate_cache
+                invalidate_cache()
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"❌ Erro ao converter: {e}")

@@ -21,6 +21,12 @@ indicador_dashboard = db.Table('indicador_dashboard',
     db.Column('dashboard_id', db.Integer, db.ForeignKey('dashboard.id'), primary_key=True)
 )
 
+# Dashboard ↔ ConfiguracaoAlerta: quais tipos de alerta automático exibir neste dashboard
+dashboard_configuracao_alerta = db.Table('dashboard_configuracao_alerta',
+    db.Column('dashboard_id', db.Integer, db.ForeignKey('dashboard.id'), primary_key=True),
+    db.Column('configuracao_alerta_id', db.Integer, db.ForeignKey('configuracao_alerta.id'), primary_key=True)
+)
+
 class ConfiguracaoDownload(db.Model):
     """Modelo para configuração de download automático"""
     id = db.Column(db.Integer, primary_key=True)
@@ -81,6 +87,10 @@ class Dashboard(db.Model):
     widgets_linhas = db.Column(db.Integer, nullable=True)  # Número de linhas no grid (opcional, None = ilimitado)
     incluir_alertas = db.Column(db.Boolean, default=False)  # Na visão lista: exibir alertas no painel direito
     opacidade_area_grafico = db.Column(db.Integer, default=20)  # 0-100, % opacidade da área sob a linha do gráfico
+    
+    # Quais tipos de alerta automático exibir (ConfiguracaoAlerta). Vazio = todos.
+    alertas_config = db.relationship('ConfiguracaoAlerta', secondary=dashboard_configuracao_alerta,
+                                     backref=db.backref('dashboards', lazy='dynamic'), lazy='select')
     
     # Relacionamento muitos-para-muitos com indicadores
     indicadores = db.relationship('Indicador', secondary=indicador_dashboard, 
@@ -367,6 +377,7 @@ class Alerta(db.Model):
     status = db.Column(db.String(20), default='ativo')
     prioridade = db.Column(db.Integer, default=3)
     origem = db.Column(db.String(50), default='automatico')
+    dashboard_id = db.Column(db.Integer, db.ForeignKey('dashboard.id'), nullable=True)  # Para alertas manuais: qual dashboard
     data_ocorrencia = db.Column(db.DateTime, nullable=True)
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
     resolvido_em = db.Column(db.DateTime, nullable=True)
@@ -375,6 +386,7 @@ class Alerta(db.Model):
     resolvido_por = db.Column(db.String(100), nullable=True)
 
     configuracao_alerta = db.relationship('ConfiguracaoAlerta', backref=db.backref('alertas', lazy=True))
+    dashboard = db.relationship('Dashboard', backref=db.backref('alertas_manuais', lazy='dynamic'))
 
     def __repr__(self):
         return f'<Alerta {self.titulo}>'
@@ -392,6 +404,7 @@ class Alerta(db.Model):
             'status': self.status,
             'prioridade': self.prioridade,
             'origem': self.origem,
+            'dashboard_id': self.dashboard_id,
             'data_ocorrencia': _fmt_sp(self.data_ocorrencia),
             'criado_em': _fmt_sp(self.criado_em),
             'resolvido_em': _fmt_sp(self.resolvido_em),

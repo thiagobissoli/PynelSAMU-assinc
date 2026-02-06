@@ -8,6 +8,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    {% if dashboard.incluir_alertas %}
+    <script src="/socket.io/socket.io.js"></script>
+    {% endif %}
     <style>
         :root {
             --bg-primary: {% if dashboard.cor_tema == 'dark' %}#000000{% else %}#f5f5f7{% endif %};
@@ -567,12 +570,6 @@
                     <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAlertaManual">
                         <i class="bi bi-plus-circle"></i> Alerta Manual
                     </button>
-                    <form method="POST" action="{{ url_for('alertas.gerar') }}" class="d-inline">
-                        <input type="hidden" name="next" value="{{ url_for('dashboards.view', id=dashboard.id) }}">
-                        <button type="submit" class="btn btn-sm btn-outline-danger">
-                            <i class="bi bi-arrow-repeat"></i> Gerar Alertas
-                        </button>
-                    </form>
                 </div>
             </div>
             <div class="list-group flex-grow-1 overflow-auto" id="listaAlertas"
@@ -604,9 +601,9 @@
                                 {% endif %}
                                 {% endif %}
                             </div>
-                            <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="{{ alerta.id }}">
+                            <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="{{ alerta.id }}" data-origem="{{ alerta.origem or 'automatico' }}">
                                 <input type="hidden" name="next" value="{{ url_for('dashboards.view', id=dashboard.id) }}">
-                                <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="Resolver">
+                                <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="{{ 'Resolver' if alerta.origem == 'manual' else 'Alerta automático - só some pelas configurações' }}">
                                     <span class="fw-bold">{{ 'M' if alerta.nome_tipo == 'Manual' else 'A' }}</span>
                                 </button>
                             </form>
@@ -628,7 +625,12 @@
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Criar Alerta Manual</h5>
-                        <button type="button" class="btn-close {% if dashboard.cor_tema == 'dark' %}btn-close-white{% endif %}" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                        <div class="d-flex align-items-center gap-2">
+                            <a href="{{ url_for('dashboards.alertas_manual', id=dashboard.id) }}" class="btn btn-sm btn-outline-primary" title="Abrir página para gerenciar alertas" target="_blank" rel="noopener noreferrer">
+                                <i class="bi bi-globe"></i>
+                            </a>
+                            <button type="button" class="btn-close {% if dashboard.cor_tema == 'dark' %}btn-close-white{% endif %}" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                        </div>
                     </div>
                     <form id="formAlertaManual">
                         <div class="modal-body">
@@ -1129,10 +1131,12 @@ document.querySelectorAll('.icone-opt-modal').forEach(function(btn) {
 });
 
 // Resolver alerta via AJAX (evita reload da página e recálculo de indicadores)
+// Alerta automático: botão não executa, só some pelas configurações
 document.addEventListener('submit', function(e) {
     var form = e.target;
     if (form && form.classList && form.classList.contains('form-resolver-alerta')) {
         e.preventDefault();
+        if (form.getAttribute('data-origem') === 'automatico') return;
         var alertaId = form.getAttribute('data-alerta-id');
         var btn = form.querySelector('button[type="submit"]');
         if (btn) btn.disabled = true;
@@ -1169,6 +1173,67 @@ document.addEventListener('submit', function(e) {
     }
 });
 
+// WebSocket: alertas em tempo real (recebe de outras telas)
+{% if dashboard.incluir_alertas %}
+(function() {
+    var list = document.getElementById('listaAlertas');
+    if (!list) return;
+    try {
+        var socket = io();
+        socket.emit('join_alertas');
+        socket.on('alerta_atualizado', function(data) {
+            if (!data || !data.acao) return;
+            var aid = data.alerta_id || (data.alerta && data.alerta.id);
+            if (data.acao === 'resolvido' || data.acao === 'arquivado') {
+                var item = document.querySelector('.painel-alerta-item[data-alerta-id="' + aid + '"]');
+                if (item) {
+                    item.style.transition = 'opacity 0.3s';
+                    item.style.opacity = '0';
+                    setTimeout(function() {
+                        item.remove();
+                        if (list && list.querySelectorAll('.painel-alerta-item').length === 0) {
+                            var empty = list.querySelector('.alert-secondary');
+                            if (!empty) {
+                                empty = document.createElement('div');
+                                empty.className = 'alert alert-secondary';
+                                empty.style.cssText = 'background: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary);';
+                                empty.innerHTML = '<i class="bi bi-info-circle"></i> Nenhum alerta ativo no momento.';
+                                list.appendChild(empty);
+                            }
+                        }
+                    }, 300);
+                }
+            } else if (data.acao === 'criado' && data.alerta) {
+                var a = data.alerta;
+                var dashId = parseInt(list.getAttribute('data-dashboard-id'), 10);
+                if (a.dashboard_id != null && a.dashboard_id !== dashId) return;
+                var transp = list.getAttribute('data-transparencia') || '33';
+                var resolverBase = list.getAttribute('data-resolver-url') || '';
+                var resolverUrl = resolverBase.replace(/\/[^/]*$/, '/' + a.id);
+                var cor = a.tipo_alerta_cor || '#6c757d';
+                var bg = cor + transp;
+                var tituloExib = (a.titulo || '').indexOf(' - ') >= 0 ? (a.titulo || '').split(' - ')[0] : (a.titulo || '');
+                var html = '<div class="list-group-item mb-2 border rounded shadow-sm painel-alerta-item" data-alerta-id="' + a.id + '" style="background-color:' + bg + ' !important; border-left: 4px solid ' + cor + ' !important; border-color: var(--border-color) !important;">' +
+                    '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
+                    '<i class="bi bi-' + (a.tipo_alerta_icone || 'megaphone') + ' me-2 flex-shrink-0" style="color:' + cor + '; font-size: 1.5rem;"></i>' +
+                    '<div><h5 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h5>' +
+                    '<small class="alerta-datetime text-secondary d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                    '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center"><div style="font-size: 1rem;">' +
+                    '<p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
+                    '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual">' +
+                    '<input type="hidden" name="next" value="{{ url_for("dashboards.view", id=dashboard.id) }}">' +
+                    '<button type="submit" class="btn btn-sm rounded-circle btn-success" title="Resolver"><span class="fw-bold">M</span></button></form></div></div></div>';
+                var empty = list.querySelector('.alert-secondary');
+                if (empty) empty.remove();
+                var div = document.createElement('div');
+                div.innerHTML = html.trim();
+                list.insertBefore(div.firstChild, list.firstChild);
+            }
+        });
+    } catch (e) { console.warn('SocketIO alertas:', e); }
+})();
+{% endif %}
+
 // Modal Alerta Manual (AJAX) - insere alerta sem recarregar a página
 var formAlerta = document.getElementById('formAlertaManual');
 if (formAlerta) {
@@ -1180,6 +1245,7 @@ if (formAlerta) {
         btn.disabled = true;
         var fd = new FormData(formAlerta);
         fd.append('next', '{{ url_for("dashboards.view", id=dashboard.id) }}');
+        fd.append('dashboard_id', '{{ dashboard.id }}');
         fetch('{{ url_for("alertas.manual_create") }}', {
             method: 'POST',
             body: fd,
@@ -1218,7 +1284,7 @@ if (formAlerta) {
                         '<small class="alerta-datetime text-secondary d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
                         '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center"><div style="font-size: 1rem;">' +
                         '<p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
-                        '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '">' +
+                        '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual">' +
                         '<input type="hidden" name="next" value="{{ url_for("dashboards.view", id=dashboard.id) }}">' +
                         '<button type="submit" class="btn btn-sm rounded-circle btn-success" title="Resolver"><span class="fw-bold">M</span></button></form></div></div></div>';
                     var div = document.createElement('div');

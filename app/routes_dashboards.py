@@ -4,15 +4,32 @@ Rotas para gerenciamento de dashboards/páginas
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 import os
+from datetime import datetime
 from app import db
-from app.models import Dashboard, Indicador, DashboardWidget, Alerta, ConfiguracaoDownload
+from app.models import Dashboard, Indicador, DashboardWidget, Alerta, ConfiguracaoDownload, ConfiguracaoAlerta
 from app.calculo_indicadores import calcular_indicador, calcular_variacao_percentual
+from app.cache_indicadores import get_or_calc_indicadores
 import logging
 import json
 
 logger = logging.getLogger(__name__)
 
 bp_dashboards = Blueprint('dashboards', __name__, url_prefix='/dashboards')
+
+
+def _alertas_para_dashboard(dashboard):
+    """Retorna alertas ativos filtrados por dashboard (automáticos selecionados + manuais do dashboard)."""
+    from sqlalchemy import or_
+    q = Alerta.query.filter_by(status='ativo')
+    config_ids = [c.id for c in dashboard.alertas_config] if dashboard.alertas_config else []
+    manual_cond = (Alerta.origem == 'manual') & (
+        (Alerta.dashboard_id == dashboard.id) | (Alerta.dashboard_id.is_(None))
+    )
+    if config_ids:
+        q = q.filter(or_(Alerta.configuracao_alerta_id.in_(config_ids), manual_cond))
+    else:
+        q = q.filter(manual_cond)  # Nenhum marcado = só alertas manuais
+    return q.order_by(Alerta.criado_em.desc()).limit(100).all()
 
 
 @bp_dashboards.route('/')
@@ -54,10 +71,14 @@ def create():
                 opacidade_area_grafico=opacidade_val
             )
             
-            # Adicionar indicadores
+            # Adicionar indicadores e alertas_config
             if indicadores_ids:
                 indicadores = Indicador.query.filter(Indicador.id.in_([int(id) for id in indicadores_ids])).all()
                 dashboard.indicadores = indicadores
+            alertas_config_ids = request.form.getlist('alertas_config')
+            if alertas_config_ids:
+                configs = ConfiguracaoAlerta.query.filter(ConfiguracaoAlerta.id.in_([int(x) for x in alertas_config_ids])).all()
+                dashboard.alertas_config = configs
             
             db.session.add(dashboard)
             db.session.commit()
@@ -72,7 +93,8 @@ def create():
     
     # GET
     indicadores = Indicador.query.filter_by(ativo=True).order_by(Indicador.ordem, Indicador.nome).all()
-    return render_template('dashboards/form.html', modo='create', indicadores=indicadores)
+    configuracoes_alerta = ConfiguracaoAlerta.query.filter_by(ativo=True).order_by(ConfiguracaoAlerta.ordem, ConfiguracaoAlerta.nome).all()
+    return render_template('dashboards/form.html', modo='create', indicadores=indicadores, configuracoes_alerta=configuracoes_alerta)
 
 
 @bp_dashboards.route('/edit/<int:id>', methods=['GET', 'POST'])
@@ -109,6 +131,14 @@ def edit(id):
             else:
                 dashboard.indicadores = []
             
+            # Atualizar alertas_config (quais tipos de alerta automático exibir)
+            alertas_config_ids = request.form.getlist('alertas_config')
+            if alertas_config_ids:
+                configs = ConfiguracaoAlerta.query.filter(ConfiguracaoAlerta.id.in_([int(x) for x in alertas_config_ids])).all()
+                dashboard.alertas_config = configs
+            else:
+                dashboard.alertas_config = []
+            
             db.session.commit()
             
             flash('Dashboard atualizado com sucesso!', 'success')
@@ -121,7 +151,8 @@ def edit(id):
     
     # GET
     indicadores = Indicador.query.filter_by(ativo=True).order_by(Indicador.ordem, Indicador.nome).all()
-    return render_template('dashboards/form.html', modo='edit', dashboard=dashboard, indicadores=indicadores)
+    configuracoes_alerta = ConfiguracaoAlerta.query.filter_by(ativo=True).order_by(ConfiguracaoAlerta.ordem, ConfiguracaoAlerta.nome).all()
+    return render_template('dashboards/form.html', modo='edit', dashboard=dashboard, indicadores=indicadores, configuracoes_alerta=configuracoes_alerta)
 
 
 @bp_dashboards.route('/delete/<int:id>', methods=['POST'])
@@ -142,38 +173,9 @@ def delete(id):
 
 @bp_dashboards.route('/view/<int:id>')
 def view(id):
-    """Visualizar dashboard (estilo app Bolsa)"""
+    """Visualizar dashboard (estilo app Bolsa) - usa cache de indicadores"""
     dashboard = Dashboard.query.get_or_404(id)
-    
-    # Calcular todos os indicadores do dashboard
-    indicadores_calculados = []
-    for indicador in dashboard.indicadores:
-        if indicador.ativo:
-            resultado = calcular_indicador(indicador)
-            resultado['id'] = indicador.id
-            resultado['nome_completo'] = indicador.nome
-            resultado['descricao'] = indicador.descricao
-            resultado['tipo_calculo'] = indicador.tipo_calculo
-            resultado['grafico_habilitado'] = indicador.grafico_habilitado
-            resultado['grafico_ultimas_horas'] = indicador.grafico_ultimas_horas
-            resultado['grafico_intervalo_minutos'] = indicador.grafico_intervalo_minutos
-            resultado['filtro_ultimas_horas'] = indicador.filtro_ultimas_horas  # Janela de média móvel
-            resultado['ordem'] = indicador.ordem
-            
-            # Configuração de tendência
-            resultado['tendencia_inversa'] = indicador.tendencia_inversa
-            resultado['cor_subida'] = indicador.cor_subida or '#34c759'
-            resultado['cor_descida'] = indicador.cor_descida or '#ff3b30'
-            
-            # Calcular variação na última hora
-            variacao = calcular_variacao_percentual(indicador)
-            resultado['variacao_percentual'] = variacao.get('variacao_percentual')
-            resultado['tendencia'] = variacao.get('tendencia', 'neutra')
-            
-            indicadores_calculados.append(resultado)
-    
-    # Ordenar por ordem configurada
-    indicadores_calculados.sort(key=lambda x: x.get('ordem', 999))
+    indicadores_calculados = get_or_calc_indicadores(dashboard, 'lista')
     
     # Se incluir_alertas, buscar alertas ativos e dados para modal
     alertas = []
@@ -185,7 +187,7 @@ def view(id):
         from app.models import ConfiguracaoAlertasSistema
         _resolver_alertas_por_tempo()
         from app.routes_alertas import _deduplicar_alertas
-        alertas_raw = Alerta.query.filter_by(status='ativo').order_by(Alerta.criado_em.desc()).limit(100).all()
+        alertas_raw = _alertas_para_dashboard(dashboard)
         alertas = _deduplicar_alertas(alertas_raw)[:50]
         icones_manual = ICONES_ALERTA
         cores_manual = CORES_ALERTA
@@ -218,63 +220,72 @@ def view(id):
     return render_template('dashboards/view.html', dashboard=dashboard, indicadores=indicadores_calculados, alertas=alertas, icones_manual=icones_manual, cores_manual=cores_manual, config_alertas=config_alertas, download_intervalo_minutos=intervalo_minutos, download_arquivo_modificado=arquivo_modificado, download_automatico_ativo=download_automatico_ativo, download_proxima_execucao_iso=proxima_execucao_iso)
 
 
+@bp_dashboards.route('/<int:id>/alertas-manual', methods=['GET', 'POST'])
+def alertas_manual(id):
+    """Página para gerenciar alertas manuais do dashboard (supervisor)."""
+    dashboard = Dashboard.query.get_or_404(id)
+    if not dashboard.incluir_alertas:
+        flash('Este dashboard não possui painel de alertas.', 'warning')
+        return redirect(url_for('dashboards.view', id=id))
+    
+    from app.routes_alertas import ICONES_ALERTA, CORES_ALERTA
+    from app.models import ConfiguracaoAlertasSistema
+    
+    if request.method == 'POST':
+        titulo = request.form.get('titulo', '').strip()
+        mensagem = request.form.get('mensagem', '').strip()
+        if titulo and mensagem:
+            try:
+                alerta = Alerta(
+                    configuracao_alerta_id=None,
+                    nome_tipo='Manual',
+                    icone_tipo=request.form.get('icone', 'megaphone').strip() or 'megaphone',
+                    cor_tipo=request.form.get('cor', '#6c757d').strip() or '#6c757d',
+                    titulo=titulo,
+                    mensagem=mensagem,
+                    prioridade=3,
+                    origem='manual',
+                    status='ativo',
+                    dashboard_id=id,
+                    criado_por='Sistema'
+                )
+                db.session.add(alerta)
+                db.session.commit()
+                try:
+                    from app.socketio_alertas import emit_alerta_atualizado
+                    emit_alerta_atualizado('criado', alerta_dict=alerta.to_dict())
+                except Exception:
+                    pass
+                flash('Alerta criado com sucesso!', 'success')
+            except Exception as e:
+                logger.error(f"Erro ao criar alerta manual: {e}", exc_info=True)
+                db.session.rollback()
+                flash(f'Erro ao criar alerta: {str(e)}', 'danger')
+        else:
+            flash('Título e mensagem são obrigatórios.', 'danger')
+        return redirect(url_for('dashboards.alertas_manual', id=id))
+    
+    alertas_manuais = Alerta.query.filter_by(
+        status='ativo', origem='manual'
+    ).filter(
+        (Alerta.dashboard_id == id) | (Alerta.dashboard_id.is_(None))
+    ).order_by(Alerta.criado_em.desc()).all()
+    
+    config_alertas = ConfiguracaoAlertasSistema.query.first()
+    return render_template('dashboards/alertas_manual.html',
+        dashboard=dashboard,
+        alertas=alertas_manuais,
+        icones=ICONES_ALERTA,
+        cores=CORES_ALERTA,
+        config_alertas=config_alertas
+    )
+
+
 @bp_dashboards.route('/widgets/<int:id>')
 def widgets(id):
-    """Visualizar dashboard em modo widgets (estilo iPhone)"""
+    """Visualizar dashboard em modo widgets (estilo iPhone) - usa cache de indicadores"""
     dashboard = Dashboard.query.get_or_404(id)
-    
-    # Calcular todos os indicadores do dashboard
-    indicadores_calculados = []
-    for indicador in dashboard.indicadores:
-        if indicador.ativo:
-            resultado = calcular_indicador(indicador)
-            resultado['id'] = indicador.id
-            resultado['nome_completo'] = indicador.nome
-            resultado['descricao'] = indicador.descricao
-            resultado['tipo_calculo'] = indicador.tipo_calculo
-            resultado['grafico_habilitado'] = indicador.grafico_habilitado
-            resultado['grafico_ultimas_horas'] = indicador.grafico_ultimas_horas
-            resultado['grafico_intervalo_minutos'] = indicador.grafico_intervalo_minutos
-            resultado['filtro_ultimas_horas'] = indicador.filtro_ultimas_horas  # Janela de média móvel
-            resultado['grafico_historico_habilitado'] = indicador.grafico_historico_habilitado
-            resultado['grafico_historico_cor'] = indicador.grafico_historico_cor or '#6c757d'
-            resultado['grafico_meta_habilitado'] = indicador.grafico_meta_habilitado
-            resultado['grafico_meta_cor'] = indicador.grafico_meta_cor or '#ffc107'
-            resultado['grafico_meta_estilo'] = indicador.grafico_meta_estilo or 'dashed'
-            resultado['ordem'] = indicador.ordem
-            
-            # Configuração de tendência
-            resultado['tendencia_inversa'] = indicador.tendencia_inversa
-            resultado['cor_subida'] = indicador.cor_subida or '#34c759'
-            resultado['cor_descida'] = indicador.cor_descida or '#ff3b30'
-            
-            # Calcular variação na última hora
-            variacao = calcular_variacao_percentual(indicador)
-            resultado['variacao_percentual'] = variacao.get('variacao_percentual')
-            resultado['tendencia'] = variacao.get('tendencia', 'neutra')
-            
-            indicadores_calculados.append(resultado)
-    
-    # Carregar configurações de widgets
-    widgets_config = {w.indicador_id: w.to_dict() for w in dashboard.widgets_config}
-    
-    # Aplicar configurações aos indicadores
-    for resultado in indicadores_calculados:
-        ind_id = resultado['id']
-        if ind_id in widgets_config:
-            config = widgets_config[ind_id]
-            resultado['widget_coluna_span'] = config.get('coluna_span', 1)
-            resultado['widget_linha_span'] = config.get('linha_span', 1)
-            resultado['widget_grafico_altura'] = config.get('grafico_altura', 80)
-            resultado['widget_ordem'] = config.get('ordem', resultado.get('ordem', 999))
-        else:
-            resultado['widget_coluna_span'] = 1
-            resultado['widget_linha_span'] = 1
-            resultado['widget_grafico_altura'] = 80
-            resultado['widget_ordem'] = resultado.get('ordem', 999)
-    
-    # Ordenar por ordem configurada
-    indicadores_calculados.sort(key=lambda x: x.get('widget_ordem', 999))
+    indicadores_calculados = get_or_calc_indicadores(dashboard, 'widgets')
     
     download_config = ConfiguracaoDownload.query.first()
     intervalo_minutos = download_config.intervalo_minutos if download_config else 60
@@ -310,6 +321,17 @@ def widgets(id):
                          download_arquivo_modificado=arquivo_modificado,
                          download_automatico_ativo=download_automatico_ativo,
                          download_proxima_execucao_iso=proxima_execucao_iso)
+
+
+@bp_dashboards.route('/api/dados/<int:id>')
+def api_dados(id):
+    """API para obter indicadores do dashboard (cache). ?mode=lista|widgets"""
+    dashboard = Dashboard.query.get_or_404(id)
+    mode = request.args.get('mode', 'lista')
+    if mode not in ('lista', 'widgets'):
+        mode = 'lista'
+    indicadores = get_or_calc_indicadores(dashboard, mode)
+    return jsonify({'indicadores': indicadores})
 
 
 @bp_dashboards.route('/api/indicador/<int:id>')

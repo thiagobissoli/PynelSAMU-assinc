@@ -503,6 +503,8 @@ def manual_create():
                 return render_template('alertas/manual_form.html', icones=ICONES_ALERTA, cores=CORES_ALERTA, next_url=request.form.get('next') or request.args.get('next'))
             icone_tipo = request.form.get('icone', 'megaphone').strip() or 'megaphone'
             cor_tipo = request.form.get('cor', '#6c757d').strip() or '#6c757d'
+            dashboard_id = request.form.get('dashboard_id', '').strip()
+            dashboard_id = int(dashboard_id) if dashboard_id.isdigit() else None
             alerta = Alerta(
                 configuracao_alerta_id=None,
                 nome_tipo='Manual',
@@ -513,10 +515,16 @@ def manual_create():
                 prioridade=3,
                 origem='manual',
                 status='ativo',
+                dashboard_id=dashboard_id,
                 criado_por='Sistema'
             )
             db.session.add(alerta)
             db.session.commit()
+            try:
+                from app.socketio_alertas import emit_alerta_atualizado
+                emit_alerta_atualizado('criado', alerta_dict=alerta.to_dict())
+            except Exception:
+                pass
             flash('Alerta criado com sucesso!', 'success')
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return jsonify({'success': True, 'alerta': alerta.to_dict()})
@@ -546,6 +554,11 @@ def resolver(id):
         alerta.resolvido_por = 'Sistema'  # TODO: usar usuário logado
         
         db.session.commit()
+        try:
+            from app.socketio_alertas import emit_alerta_atualizado
+            emit_alerta_atualizado('resolvido', alerta_id=alerta.id)
+        except Exception:
+            pass
         if is_ajax:
             return jsonify({'success': True})
         flash('Alerta resolvido com sucesso!', 'success')
@@ -572,6 +585,11 @@ def arquivar(id):
         alerta.arquivado_em = datetime.utcnow()
         
         db.session.commit()
+        try:
+            from app.socketio_alertas import emit_alerta_atualizado
+            emit_alerta_atualizado('arquivado', alerta_id=alerta.id)
+        except Exception:
+            pass
         flash('Alerta arquivado com sucesso!', 'success')
     except Exception as e:
         logger.error(f"Erro ao arquivar alerta: {e}", exc_info=True)

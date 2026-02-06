@@ -13,20 +13,30 @@ Sistema básico em Flask com Bootstrap, SQLite e suporte a variáveis de ambient
 
 ## Instalação
 
+### Windows (modo fácil)
+1. Instale o [Python](https://www.python.org/downloads/) (marque "Add Python to PATH")
+2. Instale o [Google Chrome](https://www.google.com/chrome/)
+3. Copie `env.example` para `.env` e configure `SAMU_USERNAME` e `SAMU_PASSWORD`
+4. Clique com o botão direito em `INICIAR_WINDOWS.ps1` → **Executar com PowerShell**
+
+📖 **Guia completo para iniciantes:** veja [PASSO_A_PASSO_WINDOWS.md](PASSO_A_PASSO_WINDOWS.md)
+
+### Linux/Mac ou instalação manual
+
 1. Clone o repositório ou navegue até a pasta do projeto
 
 2. Crie um ambiente virtual:
 ```bash
-python3 -m venv venv
+python3 -m venv .venv
 ```
 
 3. Ative o ambiente virtual:
 ```bash
 # Linux/Mac
-source venv/bin/activate
+source .venv/bin/activate
 
-# Windows
-venv\Scripts\activate
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
 ```
 
 4. Instale as dependências:
@@ -52,6 +62,10 @@ python run.py
 ```
 
 O sistema estará disponível em: `http://localhost:5001`
+
+### Scripts de atalho
+- **Windows:** `INICIAR_WINDOWS.ps1` (inicia) | `restart.ps1` (reinicia)
+- **Linux/Mac:** `./restart.sh` (reinicia)
 
 ## Estrutura do Projeto
 

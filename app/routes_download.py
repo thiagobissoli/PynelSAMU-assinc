@@ -51,6 +51,9 @@ def index():
     # Carregar configuração de download automático
     config = ConfiguracaoDownload.query.first()
     
+    # Download manual só pode ser executado via localhost (evita concorrência com acesso por IP)
+    pode_executar_download = request.remote_addr in ('127.0.0.1', '::1')
+    
     return render_template(
         'download/index.html',
         arquivo_existe=arquivo_existe,
@@ -58,14 +61,24 @@ def index():
         indicadores=indicadores,
         resumo=resumo,
         df=df,
-        config=config
+        config=config,
+        pode_executar_download=pode_executar_download
     )
+
+
+def _eh_localhost():
+    """Verifica se a requisição veio de localhost (permite download manual apenas localmente)"""
+    return request.remote_addr in ('127.0.0.1', '::1')
 
 
 @bp_download.route('/executar', methods=['POST'])
 def executar_download():
-    """Executa o download do arquivo de forma assíncrona"""
+    """Executa o download do arquivo de forma assíncrona. Apenas via localhost."""
     try:
+        if not _eh_localhost():
+            flash('Download manual só pode ser executado acessando via localhost (127.0.0.1). O timer automático continua funcionando.', 'warning')
+            return redirect(url_for('download.index'))
+        
         # Obter parâmetros do formulário
         dias_atras = int(request.form.get('dias_atras', 1))
         data_inicio = request.form.get('data_inicio', '').strip()
