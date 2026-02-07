@@ -165,6 +165,9 @@ class DashboardWidget(db.Model):
 
 class Indicador(db.Model):
     """Modelo para configuração de indicadores customizados"""
+    __table_args__ = (
+        db.Index('idx_indicador_ativo_ordem', 'ativo', 'ordem'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(200), nullable=False)
     descricao = db.Column(db.Text, nullable=True)
@@ -298,6 +301,9 @@ class Indicador(db.Model):
 class ConfiguracaoAlerta(db.Model):
     """Configuração única de alerta (tipo + regra no mesmo registro)."""
     __tablename__ = 'configuracao_alerta'
+    __table_args__ = (
+        db.Index('idx_config_alerta_ativo_ordem', 'ativo', 'ordem'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(200), nullable=False)
     descricao = db.Column(db.Text, nullable=True)
@@ -366,6 +372,10 @@ class ConfiguracaoAlertasSistema(db.Model):
 class Alerta(db.Model):
     """Alerta disparado (instância)."""
     __tablename__ = 'alerta'
+    __table_args__ = (
+        db.Index('idx_alerta_status_criado', 'status', 'criado_em'),
+        db.Index('idx_alerta_origem_dashboard', 'origem', 'dashboard_id'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     configuracao_alerta_id = db.Column(db.Integer, db.ForeignKey('configuracao_alerta.id'), nullable=True)
     nome_tipo = db.Column(db.String(200), nullable=True)  # preenchido na geração para exibição

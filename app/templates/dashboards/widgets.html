@@ -548,177 +548,202 @@
 <script>
 const indicadores = {{ indicadores|tojson }};
 
-function criarWidgetChart(canvasId, indicadorId) {
+// OTIMIZAÇÃO: Map para lookup O(1) em vez de find() O(n) a cada gráfico
+const indicadoresMap = new Map(indicadores.map(i => [i.id, i]));
+
+// Constantes de cor/tema (calculadas uma vez, não a cada widget)
+const gridColor = '{% if dashboard.cor_tema == "dark" %}rgba(255,255,255,0.1){% else %}rgba(0,0,0,0.1){% endif %}';
+const textColor = '{% if dashboard.cor_tema == "dark" %}#8e8e93{% else %}#6c6c70{% endif %}';
+const tooltipBg = '{% if dashboard.cor_tema == "dark" %}rgba(60,60,60,0.95){% else %}rgba(255,255,255,0.95){% endif %}';
+const tooltipFg = '{% if dashboard.cor_tema == "dark" %}#fff{% else %}#000{% endif %}';
+const opacidadeHex = '{{ (dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20) | transparencia_hex }}';
+const dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
+
+function renderizarChart(canvasId, indicadorId, data) {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     
-    // Usar a MESMA tendência que a % (backend: valor agora vs 1h atrás), não primeiro/último do gráfico
-    const ind = indicadores.find(i => i.id === indicadorId);
+    const ind = indicadoresMap.get(indicadorId);
     const widgetElement = document.querySelector(`[data-indicador-id="${indicadorId}"]`);
     const corSubida = String(widgetElement?.dataset?.corSubida || ind?.cor_subida || '#34c759').trim();
     const corDescida = String(widgetElement?.dataset?.corDescida || ind?.cor_descida || '#ff3b30').trim();
     const tendenciaInversa = widgetElement?.dataset?.tendenciaInversa === 'true' || ind?.tendencia_inversa;
-    const corPositiva = tendenciaInversa ? corDescida : corSubida;  // cor quando tendência é boa
-    const corNegativa = tendenciaInversa ? corSubida : corDescida;  // cor quando tendência é ruim
-    const tendencia = (ind && ind.tendencia) ? ind.tendencia : 'neutra';  // 'positiva'|'negativa'|'neutra' (mesma da %)
+    const corPositiva = tendenciaInversa ? corDescida : corSubida;
+    const corNegativa = tendenciaInversa ? corSubida : corDescida;
+    const tendencia = (ind && ind.tendencia) ? ind.tendencia : 'neutra';
     
-    // Buscar dados reais da API
-    fetch(`/indicadores/grafico/${indicadorId}`)
-        .then(response => response.json())
-        .then(data => {
-            const dados = Array.isArray(data) ? data : (data?.atual || []);
-            if (!data || dados.length === 0 || data.erro) {
-                return;
-            }
-            
-            const valores = dados.map(d => d.valor);
-            const labelsHora = dados.map(d => d.display_label || d.label || '');
-            const registros = dados.map(d => d.registros_janela || 0);
-            const temValor = valores.some(v => v !== null);
-            if (!temValor) return;
-            
-            const unidade = ind?.unidade || '';
-            const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
-            const corHex = cor.startsWith('#') ? cor : '#' + cor;
-            const corArea20 = corHex + '{{ (dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20) | transparencia_hex }}';
-            const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 150);
-            gradient.addColorStop(0, corArea20);
-            gradient.addColorStop(1, corArea20);
-            
-            const datasets = [{
-                label: ind?.nome || 'Atual',
-                data: valores,
-                borderColor: cor,
-                backgroundColor: gradient,
-                borderWidth: 2.5,
-                fill: true,
-                tension: 0.4,
-                pointRadius: 0,
-                pointHoverRadius: 6,
-                pointHoverBackgroundColor: cor,
-                pointHoverBorderColor: '#fff',
-                pointHoverBorderWidth: 2
-            }];
-            if (data.historico && data.historico.length === dados.length) {
-                datasets.push({
-                    label: 'Histórico',
-                    data: data.historico,
-                    borderColor: data.historico_cor || '#6c757d',
-                    borderDash: [5, 5],
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    pointHoverRadius: 4
-                });
-            }
-            if (data.meta && data.meta.length === dados.length) {
-                var dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
-                datasets.push({
-                    label: 'Meta',
-                    data: data.meta,
-                    borderColor: data.meta_cor || '#ffc107',
-                    borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
-                    fill: false,
-                    tension: 0,
-                    pointRadius: 0,
-                    pointHoverRadius: 4
-                });
-            }
-            
-            const gridColor = '{% if dashboard.cor_tema == "dark" %}rgba(255,255,255,0.1){% else %}rgba(0,0,0,0.1){% endif %}';
-            const textColor = '{% if dashboard.cor_tema == "dark" %}#8e8e93{% else %}#6c6c70{% endif %}';
-            const tooltipBg = '{% if dashboard.cor_tema == "dark" %}rgba(60,60,60,0.95){% else %}rgba(255,255,255,0.95){% endif %}';
-            const tooltipFg = '{% if dashboard.cor_tema == "dark" %}#fff{% else %}#000{% endif %}';
-            
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labelsHora,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    layout: { padding: { bottom: 4 } },
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            enabled: true,
-                            backgroundColor: tooltipBg,
-                            titleColor: tooltipFg,
-                            bodyColor: tooltipFg,
-                            borderColor: gridColor,
-                            borderWidth: 1,
-                            padding: 10,
-                            titleFont: { size: 12, weight: '600' },
-                            bodyFont: { size: 14, weight: '700' },
-                            displayColors: false,
-                            callbacks: {
-                                title: function(items) {
-                                    const idx = items[0]?.dataIndex;
-                                    return idx != null ? labelsHora[idx] : '';
-                                },
-                                label: function(context) {
-                                    const value = context.raw;
-                                    const idx = context.dataIndex;
-                                    const numRegistros = registros[idx] || 0;
-                                    const prefix = context.dataset.label || 'Valor';
-                                    const isLinhaPrincipal = context.datasetIndex === 0;
-                                    if (value != null) {
-                                        const u = (unidade || '').toLowerCase();
-                                        const fmt = (u === 'ocorrências' || u === 'regulações' || u === 'empenhos') ? Math.round(value) : value.toFixed(2);
-                                        const lines = [`${prefix}: ${fmt} ${unidade}`.trim()];
-                                        if (isLinhaPrincipal) lines.push(`Registros: ${numRegistros}`);
-                                        return lines;
-                                    }
-                                    return 'Sem dados';
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            grid: { color: gridColor, drawBorder: false },
-                            ticks: {
-                                color: textColor,
-                                font: { size: 10 },
-                                maxRotation: 0,
-                                maxTicksLimit: 8
-                            }
+    const dados = Array.isArray(data) ? data : (data?.atual || []);
+    if (!data || dados.length === 0 || data.erro) return;
+    
+    const valores = dados.map(d => d.valor);
+    const labelsHora = dados.map(d => d.display_label || d.label || '');
+    const registros = dados.map(d => d.registros_janela || 0);
+    const temValor = valores.some(v => v !== null);
+    if (!temValor) return;
+    
+    const unidade = ind?.unidade || '';
+    const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+    const corHex = cor.startsWith('#') ? cor : '#' + cor;
+    const corArea20 = corHex + opacidadeHex;
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 150);
+    gradient.addColorStop(0, corArea20);
+    gradient.addColorStop(1, corArea20);
+    
+    const datasets = [{
+        label: ind?.nome || 'Atual',
+        data: valores,
+        borderColor: cor,
+        backgroundColor: gradient,
+        borderWidth: 2.5,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 6,
+        pointHoverBackgroundColor: cor,
+        pointHoverBorderColor: '#fff',
+        pointHoverBorderWidth: 2
+    }];
+    if (data.historico && data.historico.length === dados.length) {
+        datasets.push({
+            label: 'Histórico',
+            data: data.historico,
+            borderColor: data.historico_cor || '#6c757d',
+            borderDash: [5, 5],
+            fill: false,
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+    }
+    if (data.meta && data.meta.length === dados.length) {
+        datasets.push({
+            label: 'Meta',
+            data: data.meta,
+            borderColor: data.meta_cor || '#ffc107',
+            borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
+            fill: false,
+            tension: 0,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+    }
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: { labels: labelsHora, datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { bottom: 4 } },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: tooltipBg,
+                    titleColor: tooltipFg,
+                    bodyColor: tooltipFg,
+                    borderColor: gridColor,
+                    borderWidth: 1,
+                    padding: 10,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 14, weight: '700' },
+                    displayColors: false,
+                    callbacks: {
+                        title: function(items) {
+                            const idx = items[0]?.dataIndex;
+                            return idx != null ? labelsHora[idx] : '';
                         },
-                        y: {
-                            display: true,
-                            grid: { color: gridColor, drawBorder: false },
-                            ticks: {
-                                color: textColor,
-                                font: { size: 10 },
-                                padding: 6
-                            },
-                            beginAtZero: false
+                        label: function(context) {
+                            const value = context.raw;
+                            const idx = context.dataIndex;
+                            const numRegistros = registros[idx] || 0;
+                            const prefix = context.dataset.label || 'Valor';
+                            const isLinhaPrincipal = context.datasetIndex === 0;
+                            if (value != null) {
+                                const u = (unidade || '').toLowerCase();
+                                const fmt = (u === 'ocorrências' || u === 'regulações' || u === 'empenhos') ? Math.round(value) : value.toFixed(2);
+                                const lines = [`${prefix}: ${fmt} ${unidade}`.trim()];
+                                if (isLinhaPrincipal) lines.push(`Registros: ${numRegistros}`);
+                                return lines;
+                            }
+                            return 'Sem dados';
                         }
-                    },
-                    animation: {
-                        duration: 800,
-                        easing: 'easeOutQuart'
                     }
                 }
-            });
-        })
-        .catch(error => {
-            console.log('Widget chart não disponível para', indicadorId);
-        });
-}
-
-// Criar gráficos para cada widget (com dados reais)
-document.addEventListener('DOMContentLoaded', function() {
-    indicadores.forEach(indicador => {
-        // Sempre carregar gráfico se habilitado, mesmo sem valor atual
-        if (indicador.grafico_habilitado) {
-            criarWidgetChart(`widget_chart_${indicador.id}`, indicador.id);
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { color: gridColor, drawBorder: false },
+                    ticks: { color: textColor, font: { size: 10 }, maxRotation: 0, maxTicksLimit: 8 }
+                },
+                y: {
+                    display: true,
+                    grid: { color: gridColor, drawBorder: false },
+                    ticks: { color: textColor, font: { size: 10 }, padding: 6 },
+                    beginAtZero: false
+                }
+            },
+            animation: { duration: 400, easing: 'easeOutQuart' }
         }
     });
+}
+
+// OTIMIZAÇÃO: dados de gráficos PRÉ-CALCULADOS no backend e embutidos no HTML.
+// Zero requests HTTP adicionais! Renderização progressiva com requestAnimationFrame.
+const graficosData = {{ graficos_data|tojson }};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const idsComGrafico = indicadores
+        .filter(ind => ind.grafico_habilitado)
+        .map(ind => ind.id);
+    
+    if (idsComGrafico.length > 0) {
+        if (Object.keys(graficosData).length > 0) {
+            // Dados pré-embutidos: renderizar progressivamente sem bloquear UI
+            let idx = 0;
+            function renderNext() {
+                if (idx >= idsComGrafico.length) return;
+                const id = idsComGrafico[idx];
+                const data = graficosData[String(id)];
+                if (data) {
+                    renderizarChart(`widget_chart_${id}`, id, data);
+                }
+                idx++;
+                if (idx < idsComGrafico.length) {
+                    requestAnimationFrame(renderNext);
+                }
+            }
+            requestAnimationFrame(renderNext);
+        } else {
+            // Fallback: se dados não vieram embutidos, buscar via batch HTTP
+            fetch('/indicadores/graficos/batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: idsComGrafico })
+            })
+            .then(response => response.json())
+            .then(result => {
+                const graficos = result.graficos || {};
+                idsComGrafico.forEach(id => {
+                    const data = graficos[String(id)];
+                    if (data) {
+                        renderizarChart(`widget_chart_${id}`, id, data);
+                    }
+                });
+            })
+            .catch(() => {
+                // Fallback final: carregar individualmente
+                idsComGrafico.forEach(id => {
+                    fetch(`/indicadores/grafico/${id}`)
+                        .then(r => r.json())
+                        .then(data => renderizarChart(`widget_chart_${id}`, id, data))
+                        .catch(() => {});
+                });
+            });
+        }
+    }
     
     {% if download_automatico_ativo and download_proxima_execucao_iso %}
     var proximaIso = {{ download_proxima_execucao_iso | tojson }};

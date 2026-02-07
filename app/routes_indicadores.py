@@ -489,3 +489,34 @@ def grafico(id):
     from app.cache_indicadores import get_or_calc_grafico
     resp = get_or_calc_grafico(indicador)
     return jsonify(resp)
+
+
+@bp_indicadores.route('/graficos/batch', methods=['POST'])
+def graficos_batch():
+    """Retorna dados de gráficos de MÚLTIPLOS indicadores em uma única chamada.
+    
+    OTIMIZAÇÃO: substitui N requests HTTP individuais por 1 único,
+    compartilhando o DataFrame carregado entre todos os cálculos.
+    
+    Payload: {"ids": [1, 2, 3, ...]}
+    Response: {"graficos": {"1": {...}, "2": {...}, ...}}
+    """
+    from app.cache_indicadores import get_or_calc_graficos_batch
+    
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+    
+    if not ids:
+        return jsonify({'graficos': {}})
+    
+    try:
+        ids_int = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({'erro': 'IDs devem ser números inteiros'}), 400
+    
+    resultados = get_or_calc_graficos_batch(ids_int)
+    
+    # Converter chaves para string (JSON não suporta int como chave)
+    graficos_str = {str(k): v for k, v in resultados.items()}
+    
+    return jsonify({'graficos': graficos_str})

@@ -77,7 +77,10 @@ def aplicar_condicao(df, coluna, operador, valor):
 
 def filtrar_ultimas_horas(df, coluna_data, horas):
     """
-    Filtra DataFrame para incluir apenas registros das últimas X horas
+    Filtra DataFrame para incluir apenas registros das últimas X horas.
+    
+    OTIMIZAÇÃO: evita cópia completa do DataFrame - usa conversão em
+    variável local e filtragem por máscara booleana.
     
     Args:
         df: DataFrame
@@ -85,32 +88,27 @@ def filtrar_ultimas_horas(df, coluna_data, horas):
         horas: Número de horas para filtrar
     
     Returns:
-        DataFrame filtrado
+        DataFrame filtrado (view, não cópia completa)
     """
     if coluna_data not in df.columns:
         logger.warning(f"Coluna de data '{coluna_data}' não encontrada")
         return df
     
     try:
-        # Criar cópia para evitar SettingWithCopyWarning
-        df = df.copy()
-        
-        # Converter para datetime
-        df[coluna_data] = pd.to_datetime(df[coluna_data], errors='coerce')
+        # Converter em variável local (evita SettingWithCopyWarning sem copiar tudo)
+        col_dt = pd.to_datetime(df[coluna_data], errors='coerce')
         
         # Remover timezone se presente para evitar erros de comparação
-        if df[coluna_data].dt.tz is not None:
-            df[coluna_data] = df[coluna_data].dt.tz_localize(None)
+        if col_dt.dt.tz is not None:
+            col_dt = col_dt.dt.tz_localize(None)
         
         # Calcular data limite (agora - X horas) usando datetime naive
         agora = datetime.now()
         data_limite = agora - timedelta(hours=horas)
-        
-        # Converter para pd.Timestamp para compatibilidade
         data_limite_ts = pd.Timestamp(data_limite)
         
-        # Filtrar
-        mask = df[coluna_data] >= data_limite_ts
+        # Filtrar por máscara (retorna view, não cópia)
+        mask = col_dt >= data_limite_ts
         return df[mask]
     except Exception as e:
         logger.error(f"Erro ao filtrar últimas {horas} horas: {e}")
@@ -123,8 +121,10 @@ def filtrar_dataframe(df, condicoes, filtro_ultimas_horas=None, coluna_data_filt
     Cada condição pode ter 'conector' (and/or/if) indicando como combina com a anterior.
     Formato: [{"coluna": "...", "operador": "==", "valor": "...", "conector": "and"}, ...]
     A primeira condição usa conector='and' por padrão (sem efeito).
+    
+    OTIMIZAÇÃO: não faz cópia completa do DataFrame. Usa views/máscaras booleanas.
     """
-    df_filtrado = df.copy()
+    df_filtrado = df
     
     if filtro_ultimas_horas and coluna_data_filtro:
         df_filtrado = filtrar_ultimas_horas(df_filtrado, coluna_data_filtro, filtro_ultimas_horas)
@@ -368,15 +368,28 @@ def calcular_indicador(indicador_config, df=None):
         elif tipo_calculo == 'contagem':
             resultado['valor'] = len(df_filtrado)
             resultado['unidade'] = config.get('unidade') or 'ocorrências'
-            # Min/Max: mínimo e máximo das contagens por período (mesma lógica do gráfico)
+            # OTIMIZAÇÃO: min/max da contagem são calculados de forma leve
+            # sem chamar gerar_dados_grafico() completo (evita cálculo duplo).
+            # Usa amostragem rápida com a coluna de data filtro.
             try:
+                coluna_data_filtro_c = config.get('coluna_data_filtro') or config.get('coluna_data_inicio')
                 horas_grafico = config.get('grafico_ultimas_horas') or 12
                 intervalo_min = config.get('grafico_intervalo_minutos') or 60
-                dados_grafico = gerar_dados_grafico(indicador_config, horas=horas_grafico, intervalo_minutos=intervalo_min, df=df)
-                valores_contagem = [d['valor'] for d in dados_grafico if d.get('valor') is not None]
-                if valores_contagem:
-                    resultado['minimo'] = int(min(valores_contagem))
-                    resultado['maximo'] = int(max(valores_contagem))
+                if coluna_data_filtro_c and coluna_data_filtro_c in df_filtrado.columns:
+                    col_dt = pd.to_datetime(df_filtrado[coluna_data_filtro_c], errors='coerce')
+                    if col_dt.dt.tz is not None:
+                        col_dt = col_dt.dt.tz_localize(None)
+                    agora_c = datetime.now()
+                    inicio_c = agora_c - timedelta(hours=horas_grafico)
+                    mask_c = (col_dt >= pd.Timestamp(inicio_c)) & (col_dt <= pd.Timestamp(agora_c))
+                    df_periodo = df_filtrado[mask_c]
+                    if not df_periodo.empty:
+                        col_dt_periodo = pd.to_datetime(df_periodo[coluna_data_filtro_c], errors='coerce')
+                        freq_str = f'{intervalo_min}min'
+                        contagens = col_dt_periodo.groupby(pd.Grouper(freq=freq_str)).count()
+                        if not contagens.empty:
+                            resultado['minimo'] = int(contagens.min())
+                            resultado['maximo'] = int(contagens.max())
             except Exception as e:
                 logger.debug('Min/max contagem não calculado: %s', e)
             
@@ -491,30 +504,27 @@ def calcular_variacao_percentual(indicador_config, df=None):
     agora = datetime.now()
     uma_hora_atras = agora - timedelta(hours=1)
     
-    # Calcular valor ATUAL (janela terminando agora)
-    df_atual = df.copy()
-    if coluna_data_filtro and coluna_data_filtro in df_atual.columns:
-        df_atual[coluna_data_filtro] = pd.to_datetime(df_atual[coluna_data_filtro], errors='coerce')
-        if df_atual[coluna_data_filtro].dt.tz is not None:
-            df_atual[coluna_data_filtro] = df_atual[coluna_data_filtro].dt.tz_localize(None)
+    # OTIMIZAÇÃO: converter coluna de data UMA VEZ e usar masks, sem copiar o DataFrame inteiro
+    if coluna_data_filtro and coluna_data_filtro in df.columns:
+        col_dt = pd.to_datetime(df[coluna_data_filtro], errors='coerce')
+        if col_dt.dt.tz is not None:
+            col_dt = col_dt.dt.tz_localize(None)
         
+        # Janela ATUAL: (agora - filtro_ultimas_horas) até agora
         inicio_janela_atual = agora - timedelta(hours=filtro_ultimas_horas)
-        mask_atual = (df_atual[coluna_data_filtro] >= inicio_janela_atual) & (df_atual[coluna_data_filtro] <= agora)
-        df_atual = df_atual[mask_atual]
+        mask_atual = (col_dt >= inicio_janela_atual) & (col_dt <= agora)
+        df_atual = df[mask_atual]
+        
+        # Janela ANTERIOR: (uma_hora_atras - filtro_ultimas_horas) até uma_hora_atras
+        inicio_janela_anterior = uma_hora_atras - timedelta(hours=filtro_ultimas_horas)
+        mask_anterior = (col_dt >= inicio_janela_anterior) & (col_dt <= uma_hora_atras)
+        df_anterior = df[mask_anterior]
+    else:
+        df_atual = df
+        df_anterior = df
     
     df_atual = filtrar_dataframe(df_atual, condicoes)
     df_atual = _dedup_se_ocorrencia(df_atual)
-    
-    # Calcular valor de 1 HORA ATRÁS (janela terminando 1 hora atrás)
-    df_anterior = df.copy()
-    if coluna_data_filtro and coluna_data_filtro in df_anterior.columns:
-        df_anterior[coluna_data_filtro] = pd.to_datetime(df_anterior[coluna_data_filtro], errors='coerce')
-        if df_anterior[coluna_data_filtro].dt.tz is not None:
-            df_anterior[coluna_data_filtro] = df_anterior[coluna_data_filtro].dt.tz_localize(None)
-        
-        inicio_janela_anterior = uma_hora_atras - timedelta(hours=filtro_ultimas_horas)
-        mask_anterior = (df_anterior[coluna_data_filtro] >= inicio_janela_anterior) & (df_anterior[coluna_data_filtro] <= uma_hora_atras)
-        df_anterior = df_anterior[mask_anterior]
     
     df_anterior = filtrar_dataframe(df_anterior, condicoes)
     df_anterior = _dedup_se_ocorrencia(df_anterior)
@@ -669,19 +679,21 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
         data_inicial = data_inicial.replace(minute=min_align, second=0, microsecond=0)
     
     # Aplicar apenas as condições de filtro (sem filtro de tempo, pois vamos fazer janelas móveis)
-    df_base = filtrar_dataframe(df.copy(), condicoes, filtro_ultimas_horas=None, coluna_data_filtro=None)
+    df_base = filtrar_dataframe(df, condicoes, filtro_ultimas_horas=None, coluna_data_filtro=None)
     
     if df_base.empty:
         return []
     
-    # Converter coluna de data para datetime se necessário
+    # OTIMIZAÇÃO: converter coluna de data UMA VEZ em variável local (sem modificar df_base in-place)
     if coluna_data_filtro and coluna_data_filtro in df_base.columns:
-        df_base[coluna_data_filtro] = pd.to_datetime(df_base[coluna_data_filtro], errors='coerce')
+        col_dt = pd.to_datetime(df_base[coluna_data_filtro], errors='coerce')
         # Remover timezone se presente para evitar erros de comparação
-        if df_base[coluna_data_filtro].dt.tz is not None:
-            df_base[coluna_data_filtro] = df_base[coluna_data_filtro].dt.tz_localize(None)
-        # Remover linhas com data inválida
-        df_base = df_base.dropna(subset=[coluna_data_filtro])
+        if col_dt.dt.tz is not None:
+            col_dt = col_dt.dt.tz_localize(None)
+        # Filtrar linhas com data válida
+        mask_valido = col_dt.notna()
+        df_base = df_base[mask_valido]
+        col_dt = col_dt[mask_valido]
     else:
         logger.warning(f"Coluna de data '{coluna_data_filtro}' não encontrada para gráfico")
         return []
@@ -689,75 +701,109 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
     if df_base.empty:
         return []
     
+    # OTIMIZAÇÃO: pré-converter colunas numéricas/datetime necessárias UMA VEZ
+    # (evita reconversão a cada iteração do loop)
+    col_dt_values = col_dt.values  # numpy array para comparações rápidas
+    
+    # Pré-deduplicar se por ocorrência
+    dedup_ocorrencia = (contagem_por == 'ocorrencia' and coluna_ocorrencia 
+                        and coluna_ocorrencia in df_base.columns)
+    
+    # Pré-converter colunas de diferença de tempo
+    col_inicio_dt = None
+    col_fim_dt = None
+    if tipo_calculo in ('diferenca_tempo', 'percentual_meta') and coluna_data_inicio and coluna_data_fim:
+        if coluna_data_inicio in df_base.columns and coluna_data_fim in df_base.columns:
+            col_inicio_dt = pd.to_datetime(df_base[coluna_data_inicio], errors='coerce')
+            col_fim_dt = pd.to_datetime(df_base[coluna_data_fim], errors='coerce')
+    
+    # Pré-converter coluna numérica para media/soma
+    col_numerico = None
+    if tipo_calculo in ('media', 'soma') and coluna_data_fim and coluna_data_fim in df_base.columns:
+        col_numerico = pd.to_numeric(df_base[coluna_data_fim], errors='coerce')
+    
     # Gerar pontos do gráfico com média móvel
-    # Incluir o próximo intervalo no eixo X (ex: às 08:06 já mostrar 09:00)
     limite_exibicao = agora + timedelta(minutes=intervalo_minutos)
     dados_grafico = []
     ponto_atual = data_inicial
+    agora_str = agora.strftime('%H:%M')
     
     while ponto_atual <= limite_exibicao:
         valor = None
         registros = 0
         
-        # Para CONTAGEM: usar o intervalo do gráfico como janela (contagem por período)
+        # Para CONTAGEM: usar o intervalo do gráfico como janela
         # Para OUTROS: usar a média móvel configurada
         if tipo_calculo == 'contagem':
-            # Contagem: janela = intervalo entre pontos do gráfico
             janela_fim = ponto_atual
             janela_inicio = ponto_atual - timedelta(minutes=intervalo_minutos)
         else:
-            # Outros tipos: janela = média móvel configurada
             janela_fim = ponto_atual
             janela_inicio = ponto_atual - timedelta(hours=janela_media_horas)
         
-        # Filtrar dados dentro da janela (usando pd.Timestamp para compatibilidade)
-        janela_inicio_ts = pd.Timestamp(janela_inicio)
-        janela_fim_ts = pd.Timestamp(janela_fim)
+        # OTIMIZAÇÃO: filtrar usando numpy arrays (mais rápido que pandas Series)
+        janela_inicio_np = pd.Timestamp(janela_inicio).to_numpy()
+        janela_fim_np = pd.Timestamp(janela_fim).to_numpy()
         
-        mask = (df_base[coluna_data_filtro] >= janela_inicio_ts) & (df_base[coluna_data_filtro] <= janela_fim_ts)
-        df_janela = df_base[mask]
-        if contagem_por == 'ocorrencia' and coluna_ocorrencia and coluna_ocorrencia in df_janela.columns:
-            df_janela = df_janela.drop_duplicates(subset=[coluna_ocorrencia], keep='first')
-        registros = len(df_janela)
+        mask = (col_dt_values >= janela_inicio_np) & (col_dt_values <= janela_fim_np)
+        idx_janela = df_base.index[mask]
+        
+        if dedup_ocorrencia:
+            df_janela = df_base.loc[idx_janela].drop_duplicates(subset=[coluna_ocorrencia], keep='first')
+            idx_janela = df_janela.index
+            registros = len(df_janela)
+        else:
+            registros = int(mask.sum())
         
         # Calcular valor do indicador para esta janela
-        if not df_janela.empty:
-            if tipo_calculo == 'diferenca_tempo' and coluna_data_inicio and coluna_data_fim:
-                # Média móvel de X horas para diferença de tempo
-                diferencas = calcular_diferenca_tempo(df_janela, coluna_data_inicio, coluna_data_fim, unidade)
-                diferencas_validas = diferencas.dropna()
-                if not diferencas_validas.empty:
-                    valor = float(diferencas_validas.mean())
+        if registros > 0:
+            if tipo_calculo == 'diferenca_tempo' and col_inicio_dt is not None:
+                dif = (col_fim_dt.loc[idx_janela] - col_inicio_dt.loc[idx_janela]).dt.total_seconds()
+                if unidade == 'segundos':
+                    pass
+                elif unidade == 'horas':
+                    dif = dif / 3600
+                elif unidade == 'dias':
+                    dif = dif / 86400
+                else:  # minutos (default)
+                    dif = dif / 60
+                dif_validas = dif.dropna()
+                if not dif_validas.empty:
+                    valor = float(dif_validas.mean())
                     
             elif tipo_calculo == 'contagem':
-                # Contagem direta no intervalo (total por hora)
-                valor = len(df_janela)
+                valor = registros
                 
-            elif tipo_calculo == 'media' and coluna_data_fim:
-                if coluna_data_fim in df_janela.columns:
-                    serie = pd.to_numeric(df_janela[coluna_data_fim], errors='coerce')
-                    serie_valida = serie.dropna()
-                    if not serie_valida.empty:
-                        valor = float(serie_valida.mean())
+            elif tipo_calculo == 'media' and col_numerico is not None:
+                serie_janela = col_numerico.loc[idx_janela].dropna()
+                if not serie_janela.empty:
+                    valor = float(serie_janela.mean())
                         
-            elif tipo_calculo == 'soma' and coluna_data_fim:
-                if coluna_data_fim in df_janela.columns:
-                    serie = pd.to_numeric(df_janela[coluna_data_fim], errors='coerce')
-                    serie_valida = serie.dropna()
-                    if not serie_valida.empty:
-                        valor = float(serie_valida.sum())
+            elif tipo_calculo == 'soma' and col_numerico is not None:
+                serie_janela = col_numerico.loc[idx_janela].dropna()
+                if not serie_janela.empty:
+                    valor = float(serie_janela.sum())
             
-            elif tipo_calculo == 'percentual_meta' and coluna_data_inicio and coluna_data_fim and meta_valor is not None:
+            elif tipo_calculo == 'percentual_meta' and col_inicio_dt is not None and meta_valor is not None:
                 op = meta_operador if meta_operador in ('<=', '>=') else '<='
-                dif = calcular_diferenca_tempo(df_janela, coluna_data_inicio, coluna_data_fim, unidade_medida).dropna()
+                dif = (col_fim_dt.loc[idx_janela] - col_inicio_dt.loc[idx_janela]).dt.total_seconds()
+                if unidade_medida == 'segundos':
+                    pass
+                elif unidade_medida == 'horas':
+                    dif = dif / 3600
+                elif unidade_medida == 'dias':
+                    dif = dif / 86400
+                else:
+                    dif = dif / 60
+                dif = dif.dropna()
                 if not dif.empty:
                     dentro = (dif <= float(meta_valor)).sum() if op == '<=' else (dif >= float(meta_valor)).sum()
                     total = len(dif)
                     valor = round(100.0 * dentro / total, 2) if total else None
         
-        # label: fim do período (para histórico). display_label: horário atual se período em andamento
+        # label: fim do período. display_label: horário atual se período em andamento
         label_hora = ponto_atual.strftime('%H:%M')
-        display_label = agora.strftime('%H:%M') if ponto_atual > agora else label_hora
+        display_label = agora_str if ponto_atual > agora else label_hora
         dados_grafico.append({
             'timestamp': ponto_atual.strftime('%Y-%m-%d %H:%M:%S'),
             'label': label_hora,
@@ -766,7 +812,6 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
             'registros_janela': registros
         })
         
-        # Avançar para o próximo ponto
         ponto_atual = ponto_atual + timedelta(minutes=intervalo_minutos)
     
     janela_info = f"intervalo {intervalo_minutos}min" if tipo_calculo == 'contagem' else f"média móvel {janela_media_horas}h"

@@ -5,6 +5,7 @@ Rotas para gerenciamento de dashboards/páginas
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 import os
 from datetime import datetime
+from sqlalchemy.orm import joinedload, selectinload
 from app import db
 from app.models import Dashboard, Indicador, DashboardWidget, Alerta, ConfiguracaoDownload, ConfiguracaoAlerta
 from app.calculo_indicadores import calcular_indicador, calcular_variacao_percentual
@@ -174,7 +175,12 @@ def delete(id):
 @bp_dashboards.route('/view/<int:id>')
 def view(id):
     """Visualizar dashboard (estilo app Bolsa) - usa cache de indicadores"""
-    dashboard = Dashboard.query.get_or_404(id)
+    # OTIMIZAÇÃO: eager loading de todas as relationships em UMA query
+    dashboard = Dashboard.query.options(
+        selectinload(Dashboard.indicadores),
+        selectinload(Dashboard.widgets_config),
+        selectinload(Dashboard.alertas_config),
+    ).get_or_404(id)
     indicadores_calculados = get_or_calc_indicadores(dashboard, 'lista')
     
     # Se incluir_alertas, buscar alertas ativos e dados para modal
@@ -283,9 +289,30 @@ def alertas_manual(id):
 
 @bp_dashboards.route('/widgets/<int:id>')
 def widgets(id):
-    """Visualizar dashboard em modo widgets (estilo iPhone) - usa cache de indicadores"""
-    dashboard = Dashboard.query.get_or_404(id)
+    """Visualizar dashboard em modo widgets (estilo iPhone) - usa cache de indicadores.
+    
+    OTIMIZAÇÃO: pré-calcula gráficos em paralelo junto com os indicadores
+    e embute os dados no HTML, eliminando o segundo HTTP request do frontend.
+    """
+    from app.cache_indicadores import get_or_calc_graficos_batch
+    
+    # OTIMIZAÇÃO: eager loading de todas as relationships em UMA query
+    dashboard = Dashboard.query.options(
+        selectinload(Dashboard.indicadores),
+        selectinload(Dashboard.widgets_config),
+    ).get_or_404(id)
     indicadores_calculados = get_or_calc_indicadores(dashboard, 'widgets')
+    
+    # OTIMIZAÇÃO: pré-calcular dados de gráficos e embutir no template
+    # Elimina o fetch('/indicadores/graficos/batch') do frontend
+    ids_com_grafico = [
+        ind["id"] for ind in indicadores_calculados
+        if ind.get("grafico_habilitado")
+    ]
+    graficos_data = {}
+    if ids_com_grafico:
+        graficos_batch = get_or_calc_graficos_batch(ids_com_grafico)
+        graficos_data = {str(k): v for k, v in graficos_batch.items()}
     
     download_config = ConfiguracaoDownload.query.first()
     intervalo_minutos = download_config.intervalo_minutos if download_config else 60
@@ -314,6 +341,7 @@ def widgets(id):
     return render_template('dashboards/widgets.html', 
                          dashboard=dashboard, 
                          indicadores=indicadores_calculados,
+                         graficos_data=graficos_data,
                          widgets_grid_template=dashboard.widgets_grid_template,
                          widgets_colunas=dashboard.widgets_colunas,
                          widgets_linhas=dashboard.widgets_linhas,
@@ -326,7 +354,10 @@ def widgets(id):
 @bp_dashboards.route('/api/dados/<int:id>')
 def api_dados(id):
     """API para obter indicadores do dashboard (cache). ?mode=lista|widgets"""
-    dashboard = Dashboard.query.get_or_404(id)
+    dashboard = Dashboard.query.options(
+        selectinload(Dashboard.indicadores),
+        selectinload(Dashboard.widgets_config),
+    ).get_or_404(id)
     mode = request.args.get('mode', 'lista')
     if mode not in ('lista', 'widgets'):
         mode = 'lista'
