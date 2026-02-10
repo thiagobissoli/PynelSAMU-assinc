@@ -722,13 +722,14 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
     if tipo_calculo in ('media', 'soma') and coluna_data_fim and coluna_data_fim in df_base.columns:
         col_numerico = pd.to_numeric(df_base[coluna_data_fim], errors='coerce')
     
-    # Gerar pontos do gráfico com média móvel
-    limite_exibicao = agora + timedelta(minutes=intervalo_minutos)
+    # Gerar pontos do gráfico com média móvel.
+    # Só incluir intervalos já completos (ponto_atual <= agora) para evitar queda irreal
+    # no final da curva quando a última hora/média móvel ainda não foi contabilizada.
     dados_grafico = []
     ponto_atual = data_inicial
     agora_str = agora.strftime('%H:%M')
     
-    while ponto_atual <= limite_exibicao:
+    while ponto_atual <= agora:
         valor = None
         registros = 0
         
