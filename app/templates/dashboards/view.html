@@ -803,6 +803,15 @@ const indicadores = {{ indicadores|tojson }};
 let charts = {};
 let miniCharts = {};
 
+function parseTimestamp(s) {
+    if (!s) return NaN;
+    return new Date(String(s).replace(' ', 'T')).getTime();
+}
+function formatTickHora(ms) {
+    const d = new Date(ms);
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+}
+
 // Cores do tema
 const COLORS = {
     green: '#34c759',
@@ -952,8 +961,10 @@ function renderizarGraficoPrincipal(id, data) {
     }
     
     const labels = dados.map(d => d.display_label || d.label);
-    const valores = dados.map(d => d.valor);
     const registros = dados.map(d => d.registros_janela || 0);
+    const timestampsMs = dados.map(d => parseTimestamp(d.timestamp));
+    const xMin = Math.min(...timestampsMs.filter(t => !isNaN(t)));
+    const xMax = Math.max(...timestampsMs.filter(t => !isNaN(t)));
     
     // Cor da linha = mesma cor da % de tendência (usa tendência do backend, não do gráfico)
     const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
@@ -966,7 +977,7 @@ function renderizarGraficoPrincipal(id, data) {
     gradient.addColorStop(1, corArea20);
     
     const datasets = [{
-        data: valores,
+        data: dados.map((d, i) => ({ x: timestampsMs[i], y: d.valor })),
         borderColor: cor,
         backgroundColor: gradient,
         borderWidth: 2.5,
@@ -981,7 +992,7 @@ function renderizarGraficoPrincipal(id, data) {
     if (data.historico && data.historico.length === dados.length) {
         datasets.push({
             label: 'Histórico',
-            data: data.historico,
+            data: dados.map((d, i) => ({ x: timestampsMs[i], y: data.historico[i] })),
             borderColor: data.historico_cor || '#6c757d',
             borderDash: [5, 5],
             fill: false,
@@ -994,7 +1005,7 @@ function renderizarGraficoPrincipal(id, data) {
         var dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
         datasets.push({
             label: 'Meta',
-            data: data.meta,
+            data: dados.map((d, i) => ({ x: timestampsMs[i], y: data.meta[i] })),
             borderColor: data.meta_cor || '#ffc107',
             borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
             fill: false,
@@ -1005,10 +1016,7 @@ function renderizarGraficoPrincipal(id, data) {
     }
     charts[id] = new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: labels,
-            datasets: datasets
-        },
+        data: { datasets: datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -1029,8 +1037,12 @@ function renderizarGraficoPrincipal(id, data) {
                     titleFont: { size: 13, weight: '600' },
                     bodyFont: { size: 15, weight: '700' },
                     callbacks: {
+                        title: function(items) {
+                            const idx = items[0]?.dataIndex;
+                            return idx != null ? labels[idx] : '';
+                        },
                         label: function(context) {
-                            const value = context.raw;
+                            const value = context.raw?.y ?? context.raw;
                             const unidade = indicador?.unidade || '';
                             const numRegistros = registros[context.dataIndex] || 0;
                             const prefix = context.dataset.label || 'Valor';
@@ -1049,6 +1061,9 @@ function renderizarGraficoPrincipal(id, data) {
             },
             scales: {
                 x: {
+                    type: 'linear',
+                    min: xMin,
+                    max: xMax,
                     grid: {
                         color: COLORS.gridColor,
                         drawBorder: false
@@ -1057,7 +1072,8 @@ function renderizarGraficoPrincipal(id, data) {
                         color: COLORS.textColor,
                         font: { size: 11 },
                         maxRotation: 0,
-                        maxTicksLimit: 8
+                        maxTicksLimit: 8,
+                        callback: function(v) { return formatTickHora(v); }
                     }
                 },
                 y: {

@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+{% block title %}Log de Alertas - Sistema SAMU{% endblock %}
+
+{% block extra_head %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<style>
+    .stats-card {
+        border-left: 4px solid;
+        padding: 20px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+    }
+    .stats-card.ativo {
+        border-left-color: #dc3545;
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+    .stats-card.resolvido {
+        border-left-color: #28a745;
+        background-color: rgba(40, 167, 69, 0.1);
+    }
+    .stats-card.arquivado {
+        border-left-color: #6c757d;
+        background-color: rgba(108, 117, 125, 0.1);
+    }
+    .stats-card.total {
+        border-left-color: #007bff;
+        background-color: rgba(0, 123, 255, 0.1);
+    }
+    .stats-number {
+        font-size: 32px;
+        font-weight: bold;
+        margin: 10px 0;
+    }
+    .stats-label {
+        font-size: 14px;
+        color: #666;
+        text-transform: uppercase;
+    }
+    .alert-row {
+        border-left: 4px solid;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        background: #f9f9f9;
+    }
+    .alert-row.ativo {
+        border-left-color: #dc3545;
+    }
+    .alert-row.resolvido {
+        border-left-color: #28a745;
+    }
+    .alert-row.arquivado {
+        border-left-color: #6c757d;
+    }
+    .alert-status {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+    .alert-status.ativo {
+        background-color: #dc3545;
+        color: white;
+    }
+    .alert-status.resolvido {
+        background-color: #28a745;
+        color: white;
+    }
+    .alert-status.arquivado {
+        background-color: #6c757d;
+        color: white;
+    }
+    .alert-time {
+        font-size: 12px;
+        color: #999;
+        margin-top: 8px;
+    }
+    .chart-container {
+        position: relative;
+        height: 300px;
+        margin-bottom: 30px;
+    }
+    .filter-section {
+        background: #f5f5f5;
+        padding: 20px;
+        border-radius: 4px;
+        margin-bottom: 30px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <i class="bi bi-clock-history"></i>
+        Log de Alertas
+    </h1>
+    <div>
+        <a href="{{ url_for('alertas.log_exportar', status=status_filtro, tipo=tipo_filtro, search=search, dias=dias) }}" class="btn btn-secondary">
+            <i class="bi bi-download"></i> Exportar CSV
+        </a>
+        <a href="{{ url_for('alertas.dashboard') }}" class="btn btn-primary">
+            <i class="bi bi-bell"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+<!-- Estatísticas Gerais -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="stats-card total">
+            <div class="stats-label">Total</div>
+            <div class="stats-number">{{ stats.total }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card ativo">
+            <div class="stats-label">Ativos</div>
+            <div class="stats-number">{{ stats.ativos }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card resolvido">
+            <div class="stats-label">Resolvidos</div>
+            <div class="stats-number">{{ stats.resolvidos }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card arquivado">
+            <div class="stats-label">Arquivados</div>
+            <div class="stats-number">{{ stats.arquivados }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Gráficos -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Distribuição por Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="chartStatus"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Top 10 Tipos de Alertas</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="chartTipos"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filtros -->
+<div class="filter-section">
+    <form method="GET" class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label for="status" class="form-label">Status</label>
+            <select name="status" id="status" class="form-select">
+                <option value="todos" {% if status_filtro == 'todos' %}selected{% endif %}>Todos</option>
+                <option value="ativo" {% if status_filtro == 'ativo' %}selected{% endif %}>Ativos</option>
+                <option value="resolvido" {% if status_filtro == 'resolvido' %}selected{% endif %}>Resolvidos</option>
+                <option value="arquivado" {% if status_filtro == 'arquivado' %}selected{% endif %}>Arquivados</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="tipo" class="form-label">Tipo de Alerta</label>
+            <select name="tipo" id="tipo" class="form-select">
+                <option value="">Todos os tipos</option>
+                {% for config in configs %}
+                <option value="{{ config.id }}" {% if tipo_filtro == config.id|string %}selected{% endif %}>
+                    {{ config.tipo }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label for="dias" class="form-label">Últimos (dias)</label>
+            <input type="number" name="dias" id="dias" class="form-control" value="{{ dias }}" min="1" max="365">
+        </div>
+        <div class="col-md-2">
+            <label for="search" class="form-label">Buscar</label>
+            <input type="text" name="search" id="search" class="form-control" placeholder="Mensagem..." value="{{ search }}">
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">
+                <i class="bi bi-search"></i> Filtrar
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Lista de Alertas -->
+<div class="card">
+    <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0">
+            <i class="bi bi-list"></i>
+            Alertas ({{ total }} encontrado{{ 's' if total != 1 else '' }})
+        </h5>
+    </div>
+    <div class="card-body">
+        {% if alertas.items %}
+            {% for alerta in alertas.items %}
+                {% set detalhes = alerta.get_detalhes_dict() %}
+                <div class="alert-row {{ alerta.status }}">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6 class="mb-2">
+                                <span class="alert-status {{ alerta.status }}">{{ alerta.status }}</span>
+                                {{ alerta.titulo }}
+                            </h6>
+                            <p class="mb-2">{{ alerta.mensagem }}</p>
+                            {% if detalhes.get('valor_identificado') %}
+                            <small class="text-muted">
+                                <i class="bi bi-tag"></i>
+                                Identificado: <strong>{{ detalhes.get('valor_identificado') }}</strong>
+                            </small>
+                            {% endif %}
+                            {% if detalhes.get('numero_ocorrencia') %}
+                            <br>
+                            <small class="text-muted">
+                                <i class="bi bi-file-text"></i>
+                                Ocorrência(s): <strong>{{ detalhes.get('numero_ocorrencia') }}</strong>
+                            </small>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <small class="text-muted d-block">
+                                <i class="bi bi-person"></i> {{ alerta.origem }}
+                            </small>
+                            <small class="text-muted d-block">
+                                <i class="bi bi-clock"></i>
+                                Criado em: <strong>{{ alerta.criado_em.strftime('%d/%m/%Y %H:%M:%S') }}</strong>
+                            </small>
+                            {% if alerta.resolvido_em %}
+                            <small class="text-muted d-block">
+                                <i class="bi bi-check-circle"></i>
+                                Resolvido em: <strong>{{ alerta.resolvido_em.strftime('%d/%m/%Y %H:%M:%S') }}</strong>
+                                {% if alerta.resolvido_por %}
+                                ({{ alerta.resolvido_por }})
+                                {% endif %}
+                            </small>
+                            {% endif %}
+                            <div class="mt-3">
+                                {% if alerta.status == 'ativo' %}
+                                    <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" style="display: inline;">
+                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Marcar como resolvido?')">
+                                            <i class="bi bi-check-circle"></i> Resolver
+                                        </button>
+                                    </form>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('alertas.arquivar', id=alerta.id) }}" style="display: inline;">
+                                    <button type="submit" class="btn btn-sm btn-secondary" onclick="return confirm('Arquivar alerta?')">
+                                        <i class="bi bi-archive"></i> Arquivar
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+
+            <!-- Paginação -->
+            {% if alertas.pages > 1 %}
+            <nav aria-label="Paginação">
+                <ul class="pagination mt-4 justify-content-center">
+                    {% if alertas.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('alertas.log', page=alertas.prev_num, status=status_filtro, tipo=tipo_filtro, search=search, dias=dias) }}">Anterior</a>
+                    </li>
+                    {% endif %}
+
+                    {% for page_num in alertas.iter_pages() %}
+                        {% if page_num %}
+                            {% if page_num == alertas.page %}
+                            <li class="page-item active">
+                                <span class="page-link">{{ page_num }}</span>
+                            </li>
+                            {% else %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('alertas.log', page=page_num, status=status_filtro, tipo=tipo_filtro, search=search, dias=dias) }}">{{ page_num }}</a>
+                            </li>
+                            {% endif %}
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link">...</span>
+                        </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if alertas.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('alertas.log', page=alertas.next_num, status=status_filtro, tipo=tipo_filtro, search=search, dias=dias) }}">Próximo</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        {% else %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Nenhum alerta encontrado com os filtros selecionados.
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
+$(document).ready(function() {
+    // Select2
+    $('#tipo').select2({
+        theme: 'bootstrap-5',
+        width: '100%'
+    });
+
+    // Carregar estatísticas
+    fetch('{{ url_for("alertas.log_api_estatisticas") }}?dias={{ dias }}')
+        .then(r => r.json())
+        .then(data => {
+            // Gráfico de Status
+            const statusCtx = document.getElementById('chartStatus').getContext('2d');
+            new Chart(statusCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Ativo', 'Resolvido', 'Arquivado'],
+                    datasets: [{
+                        data: [
+                            data.por_status.ativo,
+                            data.por_status.resolvido,
+                            data.por_status.arquivado
+                        ],
+                        backgroundColor: [
+                            '#dc3545',
+                            '#28a745',
+                            '#6c757d'
+                        ],
+                        borderColor: ['#fff', '#fff', '#fff'],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // Gráfico de Tipos
+            const tipos = Object.keys(data.por_tipo).sort((a, b) => data.por_tipo[b] - data.por_tipo[a]).slice(0, 10);
+            const tiposValues = tipos.map(t => data.por_tipo[t]);
+
+            const tiposCtx = document.getElementById('chartTipos').getContext('2d');
+            new Chart(tiposCtx, {
+                type: 'bar',
+                data: {
+                    labels: tipos,
+                    datasets: [{
+                        label: 'Quantidade',
+                        data: tiposValues,
+                        backgroundColor: '#007bff',
+                        borderColor: '#0056b3',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        })
+        .catch(err => console.error('Erro ao carregar estatísticas:', err));
+});
+</script>
+{% endblock %}

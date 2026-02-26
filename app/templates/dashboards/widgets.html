@@ -559,6 +559,17 @@ const tooltipFg = '{% if dashboard.cor_tema == "dark" %}#fff{% else %}#000{% end
 const opacidadeHex = '{{ (dashboard.opacidade_area_grafico if dashboard and dashboard.opacidade_area_grafico is not none else 20) | transparencia_hex }}';
 const dashMap = { solid: [], dashed: [5,5], dotted: [2,2], long_dash: [10,5], dash_dot: [8,4,2,4] };
 
+// Converte timestamp do backend (YYYY-MM-DD HH:MM:SS) para ms para escala linear no eixo X.
+// Assim a extremidade do gráfico termina exatamente na hora do último download.
+function parseTimestamp(s) {
+    if (!s) return NaN;
+    return new Date(String(s).replace(' ', 'T')).getTime();
+}
+function formatTickHora(ms) {
+    const d = new Date(ms);
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+}
+
 function renderizarChart(canvasId, indicadorId, data) {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
@@ -575,11 +586,14 @@ function renderizarChart(canvasId, indicadorId, data) {
     const dados = Array.isArray(data) ? data : (data?.atual || []);
     if (!data || dados.length === 0 || data.erro) return;
     
-    const valores = dados.map(d => d.valor);
-    const labelsHora = dados.map(d => d.display_label || d.label || '');
     const registros = dados.map(d => d.registros_janela || 0);
-    const temValor = valores.some(v => v !== null);
+    const labelsHora = dados.map(d => d.display_label || d.label || '');
+    const timestampsMs = dados.map(d => parseTimestamp(d.timestamp));
+    const temValor = dados.some(d => d.valor !== null);
     if (!temValor) return;
+    
+    const xMin = Math.min(...timestampsMs.filter(t => !isNaN(t)));
+    const xMax = Math.max(...timestampsMs.filter(t => !isNaN(t)));
     
     const unidade = ind?.unidade || '';
     const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
@@ -591,7 +605,7 @@ function renderizarChart(canvasId, indicadorId, data) {
     
     const datasets = [{
         label: ind?.nome || 'Atual',
-        data: valores,
+        data: dados.map((d, i) => ({ x: timestampsMs[i], y: d.valor })),
         borderColor: cor,
         backgroundColor: gradient,
         borderWidth: 2.5,
@@ -606,7 +620,7 @@ function renderizarChart(canvasId, indicadorId, data) {
     if (data.historico && data.historico.length === dados.length) {
         datasets.push({
             label: 'Histórico',
-            data: data.historico,
+            data: dados.map((d, i) => ({ x: timestampsMs[i], y: data.historico[i] })),
             borderColor: data.historico_cor || '#6c757d',
             borderDash: [5, 5],
             fill: false,
@@ -618,7 +632,7 @@ function renderizarChart(canvasId, indicadorId, data) {
     if (data.meta && data.meta.length === dados.length) {
         datasets.push({
             label: 'Meta',
-            data: data.meta,
+            data: dados.map((d, i) => ({ x: timestampsMs[i], y: data.meta[i] })),
             borderColor: data.meta_cor || '#ffc107',
             borderDash: dashMap[data.meta_estilo || 'dashed'] || [5,5],
             fill: false,
@@ -630,7 +644,7 @@ function renderizarChart(canvasId, indicadorId, data) {
     
     new Chart(ctx, {
         type: 'line',
-        data: { labels: labelsHora, datasets: datasets },
+        data: { datasets: datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -655,7 +669,7 @@ function renderizarChart(canvasId, indicadorId, data) {
                             return idx != null ? labelsHora[idx] : '';
                         },
                         label: function(context) {
-                            const value = context.raw;
+                            const value = context.raw?.y ?? context.raw;
                             const idx = context.dataIndex;
                             const numRegistros = registros[idx] || 0;
                             const prefix = context.dataset.label || 'Valor';
@@ -674,9 +688,18 @@ function renderizarChart(canvasId, indicadorId, data) {
             },
             scales: {
                 x: {
+                    type: 'linear',
+                    min: xMin,
+                    max: xMax,
                     display: true,
                     grid: { color: gridColor, drawBorder: false },
-                    ticks: { color: textColor, font: { size: 10 }, maxRotation: 0, maxTicksLimit: 8 }
+                    ticks: {
+                        color: textColor,
+                        font: { size: 10 },
+                        maxRotation: 0,
+                        maxTicksLimit: 8,
+                        callback: function(v) { return formatTickHora(v); }
+                    }
                 },
                 y: {
                     display: true,

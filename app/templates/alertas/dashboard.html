@@ -115,6 +115,9 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
                 <i class="bi bi-arrow-repeat"></i> Gerar Alertas
             </button>
         </form>
+        <a href="{{ url_for('alertas.log') }}" class="btn btn-info btn-sm">
+            <i class="bi bi-clock-history"></i> Log
+        </a>
         <a href="{{ url_for('alertas.config') }}" class="btn btn-secondary btn-sm">
             <i class="bi bi-gear"></i> Configurar
         </a>

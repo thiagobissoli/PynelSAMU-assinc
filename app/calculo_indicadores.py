@@ -824,11 +824,13 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
         
         ponto_atual = ponto_atual + timedelta(minutes=intervalo_minutos)
     
-    # Ponto parcial até a hora/minuto exata do último download (quando não cai em intervalo fechado)
+    # Ponto parcial até a hora/minuto exata do último download (quando não cai em intervalo fechado).
+    # Usar a MESMA janela do indicador (filtro_ultimas_horas até agora) para que o valor do último
+    # ponto coincida com o número exibido no card ("21 regulações") e a altura no gráfico corresponda.
     ultimo_ponto_completo = ponto_atual - timedelta(minutes=intervalo_minutos)
     if agora > ultimo_ponto_completo:
-        janela_inicio = ultimo_ponto_completo
         janela_fim = agora
+        janela_inicio = agora - timedelta(hours=janela_media_horas)
         janela_inicio_np = pd.Timestamp(janela_inicio).to_numpy()
         janela_fim_np = pd.Timestamp(janela_fim).to_numpy()
         mask = (col_dt_values >= janela_inicio_np) & (col_dt_values <= janela_fim_np)

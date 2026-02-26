@@ -659,3 +659,152 @@ def gerar():
     if next_url:
         return redirect(next_url)
     return redirect(url_for('alertas.dashboard'))
+
+
+@bp_alertas.route('/log')
+def log():
+    """Página de log completo de alertas com filtros e análises"""
+    pagina = request.args.get('page', 1, type=int)
+    status_filtro = request.args.get('status', 'todos')
+    tipo_filtro = request.args.get('tipo', '')
+    search = request.args.get('search', '').strip()
+    dias = request.args.get('dias', 30, type=int)
+    
+    from datetime import timedelta
+    data_limite = datetime.utcnow() - timedelta(days=dias)
+    
+    query = Alerta.query.filter(Alerta.criado_em >= data_limite)
+    
+    if status_filtro != 'todos':
+        query = query.filter_by(status=status_filtro)
+    
+    if tipo_filtro:
+        query = query.filter_by(configuracao_alerta_id=tipo_filtro)
+    
+    if search:
+        query = query.filter(
+            db.or_(
+                Alerta.titulo.ilike(f'%{search}%'),
+                Alerta.mensagem.ilike(f'%{search}%'),
+                Alerta.detalhes.ilike(f'%{search}%')
+            )
+        )
+    
+    total = query.count()
+    alertas = query.order_by(Alerta.criado_em.desc()).paginate(page=pagina, per_page=20)
+    
+    configs = ConfiguracaoAlerta.query.all()
+    
+    stats = {
+        'total': Alerta.query.count(),
+        'ativos': Alerta.query.filter_by(status='ativo').count(),
+        'resolvidos': Alerta.query.filter_by(status='resolvido').count(),
+        'arquivados': Alerta.query.filter_by(status='arquivado').count(),
+    }
+    
+    return render_template(
+        'alertas/log.html',
+        alertas=alertas,
+        total=total,
+        status_filtro=status_filtro,
+        tipo_filtro=tipo_filtro,
+        search=search,
+        dias=dias,
+        configs=configs,
+        stats=stats
+    )
+
+
+@bp_alertas.route('/log/exportar')
+def log_exportar():
+    """Exporta log de alertas em CSV"""
+    import csv
+    from io import StringIO
+    from flask import make_response
+    
+    status_filtro = request.args.get('status', 'todos')
+    tipo_filtro = request.args.get('tipo', '')
+    search = request.args.get('search', '').strip()
+    dias = request.args.get('dias', 30, type=int)
+    
+    from datetime import timedelta
+    data_limite = datetime.utcnow() - timedelta(days=dias)
+    
+    query = Alerta.query.filter(Alerta.criado_em >= data_limite)
+    
+    if status_filtro != 'todos':
+        query = query.filter_by(status=status_filtro)
+    
+    if tipo_filtro:
+        query = query.filter_by(configuracao_alerta_id=tipo_filtro)
+    
+    if search:
+        query = query.filter(
+            db.or_(
+                Alerta.titulo.ilike(f'%{search}%'),
+                Alerta.mensagem.ilike(f'%{search}%'),
+                Alerta.detalhes.ilike(f'%{search}%')
+            )
+        )
+    
+    alertas = query.order_by(Alerta.criado_em.desc()).all()
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Tipo', 'Status', 'Mensagem', 'Criado em', 'Resolvido em', 'Valor Identificado', 'Origem'])
+    
+    for a in alertas:
+        det = a.get_detalhes_dict()
+        vid = det.get('valor_identificado', '')
+        writer.writerow([
+            a.id,
+            a.titulo,
+            a.status,
+            a.mensagem,
+            a.criado_em.strftime('%d/%m/%Y %H:%M:%S'),
+            a.resolvido_em.strftime('%d/%m/%Y %H:%M:%S') if a.resolvido_em else '',
+            vid,
+            a.origem
+        ])
+    
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = "attachment; filename=log_alertas.csv"
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    return response
+
+
+@bp_alertas.route('/log/api/estatisticas')
+def log_api_estatisticas():
+    """API JSON com estatísticas de alertas"""
+    dias = request.args.get('dias', 30, type=int)
+    
+    from datetime import timedelta
+    data_limite = datetime.utcnow() - timedelta(days=dias)
+    
+    query_base = Alerta.query.filter(Alerta.criado_em >= data_limite)
+    
+    stats_por_tipo = {}
+    configs = ConfiguracaoAlerta.query.all()
+    for config in configs:
+        count = query_base.filter_by(configuracao_alerta_id=config.id).count()
+        if count > 0:
+            stats_por_tipo[config.tipo] = count
+    
+    stats_por_status = {
+        'ativo': query_base.filter_by(status='ativo').count(),
+        'resolvido': query_base.filter_by(status='resolvido').count(),
+        'arquivado': query_base.filter_by(status='arquivado').count(),
+    }
+    
+    stats_por_origem = {
+        'automatico': query_base.filter_by(origem='automatico').count(),
+        'manual': query_base.filter_by(origem='manual').count(),
+    }
+    
+    return jsonify({
+        'total': query_base.count(),
+        'por_tipo': stats_por_tipo,
+        'por_status': stats_por_status,
+        'por_origem': stats_por_origem,
+        'dias': dias
+    })
