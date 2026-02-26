@@ -4,6 +4,7 @@
 
 {% block extra_head %}
 <script src="/socket.io/socket.io.js"></script>
+<script src="{{ url_for('static', filename='js/alertas_som.js') }}"></script>
 <style>
 /* Tema Dark/Light - igual aos dashboards */
 .alertas-dashboard-wrap {
@@ -212,50 +213,27 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
 // Polling para detectar novos alertas e emitir som
 (function() {
     var knownAlertaIds = new Set([{% for a in alertas %}{{ a.id }}{% if not loop.last %}, {% endif %}{% endfor %}]);
-    var pollInterval = 30000; // 30 segundos
-
-    function playSom(id) {
-        if (!id || id === 'none') return;
-        try {
-            var Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            var ctx = new Ctx();
-            function beep(freq, start, dur) {
-                var o = ctx.createOscillator();
-                var g = ctx.createGain();
-                o.connect(g);
-                g.connect(ctx.destination);
-                o.frequency.value = freq;
-                o.type = 'sine';
-                g.gain.value = 0.25;
-                o.start(ctx.currentTime + start);
-                o.stop(ctx.currentTime + start + dur);
-            }
-            if (id === 'beep') beep(800, 0, 0.25);
-            else if (id === 'beep2') { beep(800, 0, 0.15); beep(800, 0.25, 0.15); }
-            else if (id === 'alert') beep(1000, 0, 0.4);
-            else if (id === 'notification') { beep(660, 0, 0.1); beep(880, 0.15, 0.1); beep(1100, 0.3, 0.15); }
-            else if (id === 'urgente') { beep(600, 0, 0.1); beep(800, 0.12, 0.1); beep(1000, 0.24, 0.1); beep(800, 0.36, 0.15); }
-            else beep(800, 0, 0.25);
-        } catch (e) {}
-    }
+    var pollInterval = 30000;
+    var somConfig = '{{ (config_sistema.som_alerta if config_sistema and config_sistema.som_alerta) or "beep" }}';
 
     function pollAlertas() {
         fetch('{{ url_for("alertas.api_ativos") }}')
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (!data.alertas || !data.config) return;
+                somConfig = data.config.som_alerta || 'beep';
                 var novos = data.alertas.filter(function(a) { return !knownAlertaIds.has(a.id); });
                 var novosAutomaticos = novos.filter(function(a) { return a.origem === 'automatico'; });
-                var som = data.config.som_alerta || 'beep';
-                if (novosAutomaticos.length > 0 && som !== 'none') {
-                    playSom(som);
+                if (novosAutomaticos.length > 0 && somConfig !== 'none') {
+                    AlertaSom.playSom(somConfig);
                 }
                 data.alertas.forEach(function(a) { knownAlertaIds.add(a.id); });
             })
             .catch(function() {});
     }
     setInterval(pollAlertas, pollInterval);
+
+    window._alertaSomConfig = function() { return somConfig; };
 })();
 
 setTimeout(function() { location.reload(); }, 300000);
@@ -331,6 +309,8 @@ document.addEventListener('submit', function(e) {
                 }
             } else if (data.acao === 'criado' && data.alerta) {
                 var a = data.alerta;
+                var sc = (window._alertaSomConfig ? window._alertaSomConfig() : 'beep');
+                if (sc && sc !== 'none') AlertaSom.playSom(sc);
                 var transp = list.getAttribute('data-transparencia') || '33';
                 var cor = a.tipo_alerta_icone ? (a.tipo_alerta_cor || '#ff3b30') : '#6c757d';
                 var tituloExib = (a.titulo || '').indexOf(' - ') >= 0 ? (a.titulo || '').split(' - ')[0] : (a.titulo || '');

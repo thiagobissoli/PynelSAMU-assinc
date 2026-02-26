@@ -11,10 +11,34 @@ import requests
 from app import db
 from app.models import Alerta, ConfiguracaoAlerta
 from app.indicadores import carregar_dados
-from app.calculo_indicadores import aplicar_condicao, filtrar_dataframe, calcular_indicador, calcular_diferenca_ate_agora
+from app.calculo_indicadores import aplicar_condicao, filtrar_dataframe, calcular_indicador, calcular_diferenca_ate_agora, calcular_diferenca_tempo
 
 logger = logging.getLogger(__name__)
 brasilia_tz = pytz.timezone('America/Sao_Paulo')
+
+
+def _filtrar_por_periodo(df, coluna_data_filtro, periodo_horas):
+    """Filtra DataFrame por período SEM modificar o DataFrame original (cache-safe).
+    Usa variáveis locais para conversão datetime, nunca df[col] = ...
+    """
+    if not coluna_data_filtro or coluna_data_filtro not in df.columns:
+        return df
+    agora = datetime.now(brasilia_tz)
+    limite = agora - timedelta(hours=periodo_horas)
+    col_dt = pd.to_datetime(df[coluna_data_filtro], errors='coerce', dayfirst=True)
+    if col_dt.dt.tz is None:
+        col_dt = col_dt.dt.tz_localize(brasilia_tz)
+    mask = col_dt >= limite
+    return df[mask]
+
+
+def _emit_alerta_criado(alerta):
+    """Emite SocketIO ao criar alerta automático (se disponível)."""
+    try:
+        from app.socketio_alertas import emit_alerta_atualizado
+        emit_alerta_atualizado('criado', alerta_dict=alerta.to_dict())
+    except Exception:
+        pass
 
 
 def _normalizar_valor_identificado(val):
@@ -177,15 +201,7 @@ def _resolver_multiplos_chamados(config, df, alertas_ativos):
     if coluna_telefone not in df.columns:
         return 0
     periodo_horas = config.periodo_verificacao_horas
-    df_filtrado = df
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        df_cp = df.copy()
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        df_cp[config.coluna_data_filtro] = pd.to_datetime(df_cp[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df_cp[config.coluna_data_filtro].dt.tz is None:
-            df_cp[config.coluna_data_filtro] = df_cp[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        df_filtrado = df_cp[df_cp[config.coluna_data_filtro] >= limite]
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     telefones_contagem = df_filtrado[coluna_telefone].value_counts()
     telefones_que_acionam = set(telefones_contagem[telefones_contagem >= quantidade_minima].index.astype(str))
     resolvidos = 0
@@ -227,10 +243,9 @@ def _resolver_tempo_resposta(config, df, alertas_ativos):
             col_inicio = cfg.get('coluna_data_inicio', 'Data ocorrência')
             col_fim = cfg.get('coluna_data_fim', 'Chegada no local')
             if col_inicio in df_mun.columns and col_fim in df_mun.columns:
-                df_mun = df_mun.copy()
-                df_mun[col_inicio] = pd.to_datetime(df_mun[col_inicio], errors='coerce')
-                df_mun[col_fim] = pd.to_datetime(df_mun[col_fim], errors='coerce')
-                diff = (df_mun[col_fim] - df_mun[col_inicio]).dt.total_seconds() / 60
+                col_inicio_dt = pd.to_datetime(df_mun[col_inicio], errors='coerce')
+                col_fim_dt = pd.to_datetime(df_mun[col_fim], errors='coerce')
+                diff = (col_fim_dt - col_inicio_dt).dt.total_seconds() / 60
                 media = diff.mean()
                 if pd.isna(media) or media <= tempo_maximo:
                     alerta.status = 'resolvido'
@@ -343,26 +358,14 @@ def gerar_alerta_multiplos_chamados(config, df):
         logger.warning(f"Coluna '{coluna_telefone}' não encontrada")
         return 0
     
-    # Filtrar por período
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        
-        df[config.coluna_data_filtro] = pd.to_datetime(df[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df[config.coluna_data_filtro].dt.tz is None:
-            df[config.coluna_data_filtro] = df[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df[df[config.coluna_data_filtro] >= limite]
-    else:
-        df_filtrado = df
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     
-    # Contar chamados por telefone
     telefones_contagem = df_filtrado[coluna_telefone].value_counts()
     telefones_alertas = telefones_contagem[telefones_contagem >= quantidade_minima]
     
     alertas_gerados = 0
+    novos_alertas = []
     for telefone, quantidade in telefones_alertas.items():
-        # Verificar se já existe alerta ativo para este telefone
         alerta_existente = Alerta.query.filter_by(
             configuracao_alerta_id=config.id,
             status='ativo'
@@ -371,9 +374,8 @@ def gerar_alerta_multiplos_chamados(config, df):
         ).first()
         
         if alerta_existente:
-            continue  # Já existe alerta ativo
+            continue
         
-        # Criar alerta
         alerta = Alerta(
             configuracao_alerta_id=config.id,
             nome_tipo=config.nome,
@@ -393,9 +395,13 @@ def gerar_alerta_multiplos_chamados(config, df):
         )
         
         db.session.add(alerta)
+        novos_alertas.append(alerta)
         alertas_gerados += 1
     
-    db.session.commit()
+    if alertas_gerados > 0:
+        db.session.commit()
+        for a in novos_alertas:
+            _emit_alerta_criado(a)
     return alertas_gerados
 
 
@@ -412,44 +418,26 @@ def gerar_alerta_tempo_resposta_municipio(config, df):
     if not municipios or coluna_municipio not in df.columns:
         return 0
     
-    # Filtrar por período
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        
-        df[config.coluna_data_filtro] = pd.to_datetime(df[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df[config.coluna_data_filtro].dt.tz is None:
-            df[config.coluna_data_filtro] = df[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df[df[config.coluna_data_filtro] >= limite]
-    else:
-        df_filtrado = df
-    
-    # Filtrar por municípios
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     df_filtrado = df_filtrado[df_filtrado[coluna_municipio].isin(municipios)]
     
     if df_filtrado.empty:
         return 0
     
-    # Calcular tempo de resposta
     if coluna_data_inicio in df_filtrado.columns and coluna_data_fim in df_filtrado.columns:
-        df_filtrado[coluna_data_inicio] = pd.to_datetime(df_filtrado[coluna_data_inicio], errors='coerce', dayfirst=True)
-        df_filtrado[coluna_data_fim] = pd.to_datetime(df_filtrado[coluna_data_fim], errors='coerce', dayfirst=True)
-        
-        # Calcular diferença em minutos
-        diferenca = (df_filtrado[coluna_data_fim] - df_filtrado[coluna_data_inicio]).dt.total_seconds() / 60
-        
-        # Filtrar apenas os que excedem o tempo máximo
+        col_inicio_dt = pd.to_datetime(df_filtrado[coluna_data_inicio], errors='coerce', dayfirst=True)
+        col_fim_dt = pd.to_datetime(df_filtrado[coluna_data_fim], errors='coerce', dayfirst=True)
+        diferenca = (col_fim_dt - col_inicio_dt).dt.total_seconds() / 60
         df_alertas = df_filtrado[diferenca > tempo_maximo]
         
         alertas_gerados = 0
+        novos_alertas = []
         for municipio in municipios:
             df_municipio = df_alertas[df_alertas[coluna_municipio] == municipio]
             
             if df_municipio.empty:
                 continue
             
-            # Verificar se já existe alerta ativo para este município
             alerta_existente = Alerta.query.filter_by(
                 configuracao_alerta_id=config.id,
                 status='ativo'
@@ -483,9 +471,13 @@ def gerar_alerta_tempo_resposta_municipio(config, df):
             )
             
             db.session.add(alerta)
+            novos_alertas.append(alerta)
             alertas_gerados += 1
         
-        db.session.commit()
+        if alertas_gerados > 0:
+            db.session.commit()
+            for a in novos_alertas:
+                _emit_alerta_criado(a)
         return alertas_gerados
     
     return 0
@@ -573,22 +565,11 @@ def gerar_alerta_apoio_instituicoes(config, df):
     if not instituicoes or coluna_apoio not in df.columns:
         return 0
     
-    # Filtrar por período
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        
-        df[config.coluna_data_filtro] = pd.to_datetime(df[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df[config.coluna_data_filtro].dt.tz is None:
-            df[config.coluna_data_filtro] = df[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df[df[config.coluna_data_filtro] >= limite]
-    else:
-        df_filtrado = df
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     
     alertas_gerados = 0
+    novos_alertas = []
     for instituicao in instituicoes:
-        # Filtrar por instituição (pode ser substring)
         df_instituicao = df_filtrado[df_filtrado[coluna_apoio].astype(str).str.contains(instituicao, case=False, na=False)]
         
         if df_instituicao.empty:
@@ -596,7 +577,6 @@ def gerar_alerta_apoio_instituicoes(config, df):
         
         quantidade = len(df_instituicao)
         
-        # Verificar se já existe alerta ativo
         alerta_existente = Alerta.query.filter_by(
             configuracao_alerta_id=config.id,
             status='ativo'
@@ -626,9 +606,13 @@ def gerar_alerta_apoio_instituicoes(config, df):
         )
         
         db.session.add(alerta)
+        novos_alertas.append(alerta)
         alertas_gerados += 1
     
-    db.session.commit()
+    if alertas_gerados > 0:
+        db.session.commit()
+        for a in novos_alertas:
+            _emit_alerta_criado(a)
     return alertas_gerados
 
 
@@ -638,23 +622,11 @@ def gerar_alerta_alta_demanda(config, df):
     quantidade_minima = configuracoes.get('quantidade_minima', 50)
     periodo_horas = config.periodo_verificacao_horas
     
-    # Filtrar por período
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        
-        df[config.coluna_data_filtro] = pd.to_datetime(df[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df[config.coluna_data_filtro].dt.tz is None:
-            df[config.coluna_data_filtro] = df[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df[df[config.coluna_data_filtro] >= limite]
-    else:
-        df_filtrado = df
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     
     quantidade = len(df_filtrado)
     
     if quantidade >= quantidade_minima:
-        # Verificar se já existe alerta ativo
         alerta_existente = Alerta.query.filter_by(
             configuracao_alerta_id=config.id,
             status='ativo'
@@ -683,6 +655,7 @@ def gerar_alerta_alta_demanda(config, df):
         
         db.session.add(alerta)
         db.session.commit()
+        _emit_alerta_criado(alerta)
         return 1
     
     return 0
@@ -696,32 +669,18 @@ def gerar_alerta_tempo_resposta_elevado(config, df):
     coluna_data_fim = configuracoes.get('coluna_data_fim', 'Chegada no local')
     periodo_horas = config.periodo_verificacao_horas
     
-    # Filtrar por período
-    if config.coluna_data_filtro and config.coluna_data_filtro in df.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=periodo_horas)
-        
-        df[config.coluna_data_filtro] = pd.to_datetime(df[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df[config.coluna_data_filtro].dt.tz is None:
-            df[config.coluna_data_filtro] = df[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df[df[config.coluna_data_filtro] >= limite]
-    else:
-        df_filtrado = df
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, periodo_horas)
     
     if df_filtrado.empty:
         return 0
     
-    # Calcular tempo de resposta
     if coluna_data_inicio in df_filtrado.columns and coluna_data_fim in df_filtrado.columns:
-        df_filtrado[coluna_data_inicio] = pd.to_datetime(df_filtrado[coluna_data_inicio], errors='coerce', dayfirst=True)
-        df_filtrado[coluna_data_fim] = pd.to_datetime(df_filtrado[coluna_data_fim], errors='coerce', dayfirst=True)
-        
-        diferenca = (df_filtrado[coluna_data_fim] - df_filtrado[coluna_data_inicio]).dt.total_seconds() / 60
+        col_inicio_dt = pd.to_datetime(df_filtrado[coluna_data_inicio], errors='coerce', dayfirst=True)
+        col_fim_dt = pd.to_datetime(df_filtrado[coluna_data_fim], errors='coerce', dayfirst=True)
+        diferenca = (col_fim_dt - col_inicio_dt).dt.total_seconds() / 60
         tempo_medio = diferenca.mean()
         
         if tempo_medio > tempo_maximo:
-            # Verificar se já existe alerta ativo
             alerta_existente = Alerta.query.filter_by(
                 configuracao_alerta_id=config.id,
                 status='ativo'
@@ -752,6 +711,7 @@ def gerar_alerta_tempo_resposta_elevado(config, df):
             
             db.session.add(alerta)
             db.session.commit()
+            _emit_alerta_criado(alerta)
             return 1
     
     return 0
@@ -769,7 +729,6 @@ def gerar_alerta_generico(config, df):
     logger.debug(f"Configurações: {configuracoes}")
     logger.debug(f"Condições: {condicoes}")
     
-    # Obter coluna de dados principal (não obrigatória quando tipo_calculo está definido)
     tipo_calculo = configuracoes.get('tipo_calculo')
     coluna_dados = configuracoes.get('coluna_dados')
     if not tipo_calculo and (not coluna_dados or coluna_dados not in df.columns):
@@ -778,21 +737,8 @@ def gerar_alerta_generico(config, df):
     if coluna_dados:
         logger.info(f"Coluna de dados: {coluna_dados}")
     
-    # Aplicar filtro de período primeiro
-    df_filtrado = df.copy()
-    logger.info(f"Dados iniciais: {len(df_filtrado)} linhas")
-    
-    if config.coluna_data_filtro and config.coluna_data_filtro in df_filtrado.columns:
-        agora = datetime.now(brasilia_tz)
-        limite = agora - timedelta(hours=config.periodo_verificacao_horas)
-        logger.info(f"Filtrando por período: últimas {config.periodo_verificacao_horas}h usando coluna '{config.coluna_data_filtro}'")
-        
-        df_filtrado[config.coluna_data_filtro] = pd.to_datetime(df_filtrado[config.coluna_data_filtro], errors='coerce', dayfirst=True)
-        if df_filtrado[config.coluna_data_filtro].dt.tz is None:
-            df_filtrado[config.coluna_data_filtro] = df_filtrado[config.coluna_data_filtro].dt.tz_localize(brasilia_tz)
-        
-        df_filtrado = df_filtrado[df_filtrado[config.coluna_data_filtro] >= limite]
-        logger.info(f"Após filtro de período: {len(df_filtrado)} linhas")
+    df_filtrado = _filtrar_por_periodo(df, config.coluna_data_filtro, config.periodo_verificacao_horas)
+    logger.info(f"Dados após filtro de período: {len(df_filtrado)} linhas")
     
     # Aplicar condições de filtro (conector por condição ou legado)
     if condicoes:
@@ -804,15 +750,14 @@ def gerar_alerta_generico(config, df):
         logger.warning(f"Nenhum dado encontrado após filtros para alerta {config.id}")
         return 0
     
-    # Aplicar contagem_por (linhas ou ocorrência)
     contagem_por = configuracoes.get('contagem_por', 'linhas')
     coluna_ocorrencia = configuracoes.get('coluna_ocorrencia')
-    df_antes_dedup = df_filtrado.copy()  # mantém todas as linhas para extrair ocorrências
+    df_antes_dedup = df_filtrado
     if contagem_por == 'ocorrencia' and coluna_ocorrencia and coluna_ocorrencia in df_filtrado.columns:
         df_filtrado = df_filtrado.drop_duplicates(subset=[coluna_ocorrencia], keep='first')
     
-    # Processar cada tipo de verificação configurado
     alertas_gerados = 0
+    novos_alertas = []
     
     # Filtrar apenas tipos de verificação válidos
     tipos_validos = ['contar', 'contar_unicos', 'contar_repetidos', 'contem', 'nao_contem', 
@@ -847,6 +792,94 @@ def gerar_alerta_generico(config, df):
         valor = resultado.get('valor')
         if valor is None:
             return 0
+
+        # diferenca_tempo com coluna_dados: alertas individuais por valor da coluna (não gerar alerta genérico)
+        _col_unidade = configuracoes.get('coluna_dados')
+        _alerta_valor_raw = configuracoes.get('alerta_valor')
+        if (tipo_calculo == 'diferenca_tempo'
+                and _alerta_valor_raw is not None
+                and _col_unidade
+                and _col_unidade in df.columns):
+            col_dt_inicio = configuracoes.get('coluna_data_inicio')
+            col_dt_fim = configuracoes.get('coluna_data_fim')
+            unidade_calc = configuracoes.get('unidade', 'minutos')
+            _op = configuracoes.get('alerta_operador') or '>='
+            logger.info(f"diferenca_tempo per-unit: coluna={_col_unidade}, inicio={col_dt_inicio}, fim={col_dt_fim}, op={_op}, limite={_alerta_valor_raw}")
+            alertas_gerados = 0
+            novos_alertas = []
+            if col_dt_inicio and col_dt_fim:
+                df_filt = filtrar_dataframe(df, condicoes, config.periodo_verificacao_horas, config.coluna_data_filtro)
+                if col_dt_inicio in df_filt.columns and col_dt_fim in df_filt.columns and not df_filt.empty:
+                    diffs = calcular_diferenca_tempo(df_filt, col_dt_inicio, col_dt_fim, unidade_calc)
+                    try:
+                        _limite = float(_alerta_valor_raw)
+                    except (TypeError, ValueError):
+                        _limite = None
+                    if _limite is not None:
+                        if _op == '>=':
+                            mask = diffs >= _limite
+                        elif _op == '>':
+                            mask = diffs > _limite
+                        elif _op == '<=':
+                            mask = diffs <= _limite
+                        elif _op == '<':
+                            mask = diffs < _limite
+                        elif _op == '==':
+                            mask = abs(diffs - _limite) < 1e-6
+                        else:
+                            mask = diffs >= _limite
+                        mask = mask & diffs.notna()
+                        if mask.any():
+                            idx_exc = mask[mask].index
+                            df_exc = df_filt.loc[idx_exc].copy()
+                            df_exc['_diff'] = diffs.loc[idx_exc].values
+                            _unidade_str = resultado.get('unidade', configuracoes.get('unidade', ''))
+                            col_ocor = configuracoes.get('coluna_ocorrencia') or 'Ocorrência'
+                            for unit_val in df_exc[_col_unidade].dropna().astype(str).unique():
+                                df_u = df_exc[df_exc[_col_unidade].astype(str) == unit_val]
+                                valor_u = float(df_u['_diff'].max())
+                                valor_fmt = _formatar_valor_tempo(valor_u, _unidade_str or 'minutos')
+                                msg_parts = [f"{_col_unidade}: {unit_val}"]
+                                ocorrencias_list = []
+                                if col_ocor in df_u.columns:
+                                    ocorrencias_list = df_u[col_ocor].dropna().astype(str).unique().tolist()
+                                    if ocorrencias_list:
+                                        msg_parts.append(f"Ocorrência(s): {', '.join(ocorrencias_list)}")
+                                msg_parts.append(f"Tempo: {valor_fmt}")
+                                mensagem = ' | '.join(msg_parts)
+                                detalhes = {
+                                    'tipo_calculo': tipo_calculo,
+                                    'valor_calculado': valor_u,
+                                    'valor_calculado_fmt': valor_fmt,
+                                    'unidade': _unidade_str,
+                                    'valor_identificado': unit_val,
+                                }
+                                if ocorrencias_list:
+                                    detalhes['numero_ocorrencia'] = ', '.join(ocorrencias_list)
+                                if not _alerta_existe_valor_identificado(config.id, unit_val):
+                                    alerta = Alerta(
+                                        configuracao_alerta_id=config.id,
+                                        nome_tipo=config.nome,
+                                        icone_tipo=config.icone or 'exclamation-triangle',
+                                        cor_tipo=config.cor or '#dc3545',
+                                        titulo=config.tipo,
+                                        mensagem=mensagem,
+                                        detalhes=json.dumps(detalhes),
+                                        prioridade=config.prioridade,
+                                        origem='automatico',
+                                        status='ativo',
+                                        data_ocorrencia=datetime.now(brasilia_tz)
+                                    )
+                                    db.session.add(alerta)
+                                    novos_alertas.append(alerta)
+                                    alertas_gerados += 1
+                            if alertas_gerados:
+                                db.session.commit()
+                                for a in novos_alertas:
+                                    _emit_alerta_criado(a)
+            # IMPORTANTE: SAIR aqui sem gerar alerta genérico (quando coluna_dados está preenchida)
+            return alertas_gerados
+
         # Verificar se alguma condição dispara o alerta
         disparou = False
         # Prioridade 1: alerta_operador e alerta_valor (nova seção dedicada no form)
@@ -937,9 +970,12 @@ def gerar_alerta_generico(config, df):
                                     data_ocorrencia=datetime.now(brasilia_tz)
                                 )
                                 db.session.add(alerta)
+                                novos_alertas.append(alerta)
                                 alertas_gerados += 1
                         if alertas_gerados:
                             db.session.commit()
+                            for a in novos_alertas:
+                                _emit_alerta_criado(a)
                             return alertas_gerados
                 return 0
             # Caso único (sem coluna de unidades ou outro tipo_calculo)
@@ -966,6 +1002,7 @@ def gerar_alerta_generico(config, df):
                 )
                 db.session.add(alerta)
                 db.session.commit()
+                _emit_alerta_criado(alerta)
                 return 1
         return 0
     
@@ -1059,6 +1096,7 @@ def gerar_alerta_generico(config, df):
                     )
                     
                     db.session.add(alerta)
+                    novos_alertas.append(alerta)
                     alertas_gerados += 1
                     logger.info(f"Alerta gerado para valor repetido: {valor_identificado} ({quantidade}x)")
                 
@@ -1121,6 +1159,7 @@ def gerar_alerta_generico(config, df):
                         )
                         
                         db.session.add(alerta)
+                        novos_alertas.append(alerta)
                         alertas_gerados += 1
                     
                     continue
@@ -1177,9 +1216,9 @@ def gerar_alerta_generico(config, df):
                             )
                             
                             db.session.add(alerta)
+                            novos_alertas.append(alerta)
                             alertas_gerados += 1
                     else:
-                        # Sem coluna Ocorrência, gerar 1 alerta geral
                         resultado = True
                         mensagem_detalhes = f"Valor '{valor_limite}' encontrado {len(df_igual)} vez(es)"
                     
@@ -1240,6 +1279,7 @@ def gerar_alerta_generico(config, df):
                         )
                         
                         db.session.add(alerta)
+                        novos_alertas.append(alerta)
                         alertas_gerados += 1
                     
                     continue
@@ -1400,6 +1440,7 @@ def gerar_alerta_generico(config, df):
                 )
                 
                 db.session.add(alerta)
+                novos_alertas.append(alerta)
                 alertas_gerados += 1
                 logger.info(f"Alerta genérico gerado: {config.tipo} - {tipo_verificacao}")
         
@@ -1409,5 +1450,7 @@ def gerar_alerta_generico(config, df):
     
     if alertas_gerados > 0:
         db.session.commit()
+        for a in novos_alertas:
+            _emit_alerta_criado(a)
     
     return alertas_gerados

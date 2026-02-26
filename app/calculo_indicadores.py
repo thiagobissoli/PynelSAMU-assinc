@@ -2,12 +2,14 @@
 Sistema de cálculo dinâmico de indicadores baseado em configurações
 """
 
+import os
 import pandas as pd
 import logging
 from datetime import datetime, timedelta
 import pytz
 from app.indicadores import carregar_dados as carregar_dados_indicadores
 from app.models import Indicador
+from app.utils import obter_caminho_arquivo
 
 logger = logging.getLogger(__name__)
 brasilia_tz = pytz.timezone('America/Sao_Paulo')
@@ -668,9 +670,16 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
     # Cada ponto do gráfico será a média dos dados das últimas X horas
     janela_media_horas = config.get('filtro_ultimas_horas') or 2  # Padrão: 2 horas
     
-    # Calcular data inicial (agora - X horas do gráfico)
-    # Usar datetime naive (sem timezone) para compatibilidade com pandas
-    agora = datetime.now()
+    # Limite do gráfico = hora e minuto exatos do último download (mtime do arquivo).
+    # Assim o gráfico reflete os dados até quando o arquivo foi gerado, não a última hora completa.
+    caminho_arquivo = obter_caminho_arquivo()
+    if os.path.exists(caminho_arquivo):
+        try:
+            agora = datetime.fromtimestamp(os.path.getmtime(caminho_arquivo))
+        except OSError:
+            agora = datetime.now()
+    else:
+        agora = datetime.now()
     data_inicial = agora - timedelta(hours=horas)
     
     # Alinhar a horários "redondos" para legenda do eixo X (ex: 1:00, 2:00 ou 1:00, 1:30, 2:00)
@@ -815,7 +824,68 @@ def gerar_dados_grafico(indicador_config, horas=12, intervalo_minutos=60, df=Non
         
         ponto_atual = ponto_atual + timedelta(minutes=intervalo_minutos)
     
+    # Ponto parcial até a hora/minuto exata do último download (quando não cai em intervalo fechado)
+    ultimo_ponto_completo = ponto_atual - timedelta(minutes=intervalo_minutos)
+    if agora > ultimo_ponto_completo:
+        janela_inicio = ultimo_ponto_completo
+        janela_fim = agora
+        janela_inicio_np = pd.Timestamp(janela_inicio).to_numpy()
+        janela_fim_np = pd.Timestamp(janela_fim).to_numpy()
+        mask = (col_dt_values >= janela_inicio_np) & (col_dt_values <= janela_fim_np)
+        idx_janela = df_base.index[mask]
+        if dedup_ocorrencia:
+            df_janela = df_base.loc[idx_janela].drop_duplicates(subset=[coluna_ocorrencia], keep='first')
+            idx_janela = df_janela.index
+            registros = len(df_janela)
+        else:
+            registros = int(mask.sum())
+        valor = None
+        if registros > 0:
+            if tipo_calculo == 'diferenca_tempo' and col_inicio_dt is not None:
+                dif = (col_fim_dt.loc[idx_janela] - col_inicio_dt.loc[idx_janela]).dt.total_seconds()
+                if unidade == 'horas':
+                    dif = dif / 3600
+                elif unidade == 'dias':
+                    dif = dif / 86400
+                else:
+                    dif = dif / 60 if unidade != 'segundos' else dif
+                dif_validas = dif.dropna()
+                if not dif_validas.empty:
+                    valor = float(dif_validas.mean())
+            elif tipo_calculo == 'contagem':
+                valor = registros
+            elif tipo_calculo == 'media' and col_numerico is not None:
+                serie_janela = col_numerico.loc[idx_janela].dropna()
+                if not serie_janela.empty:
+                    valor = float(serie_janela.mean())
+            elif tipo_calculo == 'soma' and col_numerico is not None:
+                serie_janela = col_numerico.loc[idx_janela].dropna()
+                if not serie_janela.empty:
+                    valor = float(serie_janela.sum())
+            elif tipo_calculo == 'percentual_meta' and col_inicio_dt is not None and meta_valor is not None:
+                op = meta_operador if meta_operador in ('<=', '>=') else '<='
+                dif = (col_fim_dt.loc[idx_janela] - col_inicio_dt.loc[idx_janela]).dt.total_seconds()
+                if unidade_medida == 'horas':
+                    dif = dif / 3600
+                elif unidade_medida == 'dias':
+                    dif = dif / 86400
+                else:
+                    dif = dif / 60 if unidade_medida != 'segundos' else dif
+                dif = dif.dropna()
+                if not dif.empty:
+                    dentro = (dif <= float(meta_valor)).sum() if op == '<=' else (dif >= float(meta_valor)).sum()
+                    total = len(dif)
+                    valor = round(100.0 * dentro / total, 2) if total else None
+        label_fim = agora.strftime('%H:%M')
+        dados_grafico.append({
+            'timestamp': agora.strftime('%Y-%m-%d %H:%M:%S'),
+            'label': label_fim,
+            'display_label': label_fim,
+            'valor': valor,
+            'registros_janela': registros
+        })
+    
     janela_info = f"intervalo {intervalo_minutos}min" if tipo_calculo == 'contagem' else f"média móvel {janela_media_horas}h"
-    logger.info(f"Gráfico gerado: {len(dados_grafico)} pontos, {janela_info}, intervalo de {intervalo_minutos}min")
+    logger.info(f"Gráfico gerado: {len(dados_grafico)} pontos, {janela_info}, intervalo de {intervalo_minutos}min, limite {agora.strftime('%H:%M')}")
     
     return dados_grafico

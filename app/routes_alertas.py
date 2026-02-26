@@ -39,30 +39,76 @@ def index():
     return redirect(url_for('alertas.dashboard'))
 
 
+def _limpar_alertas_antigos():
+    """Remove alertas resolvidos/arquivados com mais de 7 dias para evitar crescimento do banco."""
+    from datetime import timedelta
+    limite = datetime.utcnow() - timedelta(days=7)
+    try:
+        qtd = Alerta.query.filter(
+            Alerta.status.in_(['resolvido', 'arquivado']),
+            Alerta.criado_em < limite
+        ).delete(synchronize_session=False)
+        if qtd > 0:
+            db.session.commit()
+            logger.info("Limpeza: %d alertas antigos removidos", qtd)
+    except Exception as e:
+        logger.warning("Erro na limpeza de alertas antigos: %s", e)
+        db.session.rollback()
+
+
 def _resolver_alertas_por_tempo():
-    """Resolve alertas automáticos (sem sumir_quando_resolvido) após X minutos."""
+    """Resolve alertas automáticos (sem sumir_quando_resolvido) após X minutos.
+    Só considera configurações ativas. Também executa limpeza periódica.
+    """
+    _limpar_alertas_antigos()
     cfg = ConfiguracaoAlertasSistema.query.first()
     minutos = (cfg.resolver_apos_minutos if cfg else 45) or 45
     from datetime import timedelta
     limite = datetime.utcnow() - timedelta(minutes=minutos)
-    configs_sem_auto = [c.id for c in ConfiguracaoAlerta.query.filter_by(sumir_quando_resolvido=False).all()]
+    configs_sem_auto = [c.id for c in ConfiguracaoAlerta.query.filter_by(
+        sumir_quando_resolvido=False, ativo=True
+    ).all()]
     if not configs_sem_auto:
         return
-    for a in Alerta.query.filter(Alerta.status == 'ativo', Alerta.configuracao_alerta_id.in_(configs_sem_auto), Alerta.criado_em < limite).all():
+    alertas_resolvidos = Alerta.query.filter(
+        Alerta.status == 'ativo',
+        Alerta.configuracao_alerta_id.in_(configs_sem_auto),
+        Alerta.criado_em < limite
+    ).all()
+    if not alertas_resolvidos:
+        return
+    ids_resolvidos = []
+    for a in alertas_resolvidos:
         a.status = 'resolvido'
         a.resolvido_em = datetime.utcnow()
         a.resolvido_por = 'Sistema'
+        ids_resolvidos.append(a.id)
     try:
         db.session.commit()
+        try:
+            from app.socketio_alertas import emit_alerta_atualizado
+            for aid in ids_resolvidos:
+                emit_alerta_atualizado('resolvido', alerta_id=aid)
+        except Exception:
+            pass
     except Exception as e:
         logger.warning("Erro ao resolver alertas por tempo: %s", e)
         db.session.rollback()
 
 
+_ultimo_resolve_por_tempo = 0
+
 @bp_alertas.route('/api/ativos')
 def api_ativos():
-    """API para polling: retorna alertas ativos e config (son_notificar)."""
-    _resolver_alertas_por_tempo()
+    """API para polling: retorna alertas ativos e config.
+    Executa resolução por tempo no máximo a cada 60s para evitar commits em cada poll.
+    """
+    import time
+    global _ultimo_resolve_por_tempo
+    agora = time.time()
+    if agora - _ultimo_resolve_por_tempo > 60:
+        _resolver_alertas_por_tempo()
+        _ultimo_resolve_por_tempo = agora
     alertas_raw = Alerta.query.filter_by(status='ativo').order_by(
         Alerta.criado_em.desc()
     ).limit(100).all()

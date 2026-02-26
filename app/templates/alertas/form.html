@@ -244,7 +244,7 @@
                             <option value="{{ coluna }}" {% if config and config.get_configuracoes_dict().get('coluna_dados') == coluna %}selected{% endif %}>{{ coluna }}</option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Esta é a coluna principal onde o alerta irá buscar e analisar os dados (ex: Telefone, Município, Ocorrência). <strong>Opcional</strong> quando Tipo de Cálculo está definido. Para "Tempo desde (até agora)", se preenchida, será usada para listar as unidades que excedem o limite no alerta (ex: coluna Unidade, Veículo).</small>
+                        <small class="form-text text-muted">Esta é a coluna principal onde o alerta irá buscar e analisar os dados (ex: Telefone, Município, Ocorrência). <strong>Opcional</strong> quando Tipo de Cálculo está definido. Para "Diferença de Tempo" e "Tempo desde (até agora)", se preenchida, será usada para gerar <strong>alertas individuais</strong> por cada valor que exceder o limite (ex: coluna Regulador, Médico, Unidade).</small>
                     </div>
                 </div>
             </div>
