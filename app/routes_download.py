@@ -20,6 +20,10 @@ from app.indicadores import (
     gerar_resumo_dados,
     obter_estatisticas_coluna
 )
+from app.auth_utils import permission_required_or_admin
+from app.calculo_indicadores import filtrar_dataframe
+from urllib.parse import urlencode
+from itertools import zip_longest
 
 logger = logging.getLogger(__name__)
 brasilia_tz = pytz.timezone('America/Sao_Paulo')
@@ -28,6 +32,7 @@ bp_download = Blueprint('download', __name__, url_prefix='/download')
 
 
 @bp_download.route('/')
+@permission_required_or_admin('download.ver')
 def index():
     """Página principal de download e indicadores"""
     # Verificar se arquivos existem
@@ -72,6 +77,7 @@ def _eh_localhost():
 
 
 @bp_download.route('/executar', methods=['POST'])
+@permission_required_or_admin('download.ver')
 def executar_download():
     """Executa o download do arquivo de forma assíncrona. Apenas via localhost."""
     try:
@@ -149,6 +155,7 @@ def executar_download():
 
 
 @bp_download.route('/indicadores')
+@permission_required_or_admin('download.ver')
 def ver_indicadores():
     """Visualiza indicadores detalhados"""
     df = carregar_dados()
@@ -176,26 +183,110 @@ def ver_indicadores():
     )
 
 
+def _condicoes_filtro_download_from_request():
+    """
+    Lê f_c, f_o, f_v (listas alinhadas) e monta condições para filtrar_dataframe.
+    Cada condição adicional combina com AND.
+    """
+    cols = request.args.getlist('f_c')
+    ops = request.args.getlist('f_o')
+    vals = request.args.getlist('f_v')
+    condicoes = []
+    for c, o, v in zip_longest(cols, ops, vals, fillvalue=''):
+        c = (c or '').strip()
+        if not c:
+            continue
+        o = (o or '==').strip() or '=='
+        v_raw = v if v is not None else ''
+        if o in ('is null', 'is not null'):
+            val = None
+        else:
+            val = str(v_raw).strip() if v_raw is not None else ''
+        condicoes.append({
+            'coluna': c,
+            'operador': o,
+            'valor': val,
+            'conector': 'and',
+        })
+    return condicoes
+
+
+def _filtros_rows_for_template(colunas, condicoes):
+    """Lista de dicts para repovoar o form (sempre pelo menos uma linha vazia)."""
+    if not condicoes:
+        return [{'col': '', 'op': '==', 'val': ''}]
+    rows = []
+    for c in condicoes:
+        o = c.get('operador', '==')
+        v = c.get('valor')
+        if o in ('is null', 'is not null'):
+            v_disp = ''
+        else:
+            v_disp = v if v is not None and v != '' else ''
+        rows.append({
+            'col': c.get('coluna', ''),
+            'op': o,
+            'val': v_disp,
+        })
+    return rows
+
+
 @bp_download.route('/dados')
+@permission_required_or_admin('download.ver')
 def ver_dados():
-    """Visualiza os dados em formato de tabela"""
+    """Visualiza os dados em formato de tabela, com filtros dinâmicos (GET f_c, f_o, f_v)."""
     df = carregar_dados()
     
     if df is None:
         flash('Nenhum arquivo encontrado. Execute um download primeiro.', 'warning')
         return redirect(url_for('download.index'))
     
-    # Paginação simples
+    colunas = df.columns.tolist()
+    condicoes = _condicoes_filtro_download_from_request()
+    if condicoes:
+        for c in condicoes:
+            if c['coluna'] not in colunas:
+                flash(f"Coluna de filtro desconhecida: {c['coluna']}", 'warning')
+                break
+        else:
+            try:
+                df = filtrar_dataframe(df, condicoes, filtro_ultimas_horas=None, coluna_data_filtro=None, operador_condicoes='and')
+            except Exception as e:
+                logger.warning("Filtro em /download/dados: %s", e, exc_info=True)
+                flash('Não foi possível aplicar os filtros. Tente ajustar os critérios.', 'danger')
+    
+    filtros_rows = _filtros_rows_for_template(colunas, condicoes)
+    
+    # Parâmetros fixos a preservar na query string (sem f_c/f_o/f_v: reconstruídos no template)
     pagina = int(request.args.get('pagina', 1))
-    por_pagina = int(request.args.get('por_pagina', 50))
+    try:
+        por_pagina = int(request.args.get('por_pagina', 50))
+    except (TypeError, ValueError):
+        por_pagina = 50
+    por_pagina = max(5, min(por_pagina, 500))
     
     total_linhas = len(df)
-    total_paginas = (total_linhas + por_pagina - 1) // por_pagina
+    total_paginas = max(1, (total_linhas + por_pagina - 1) // por_pagina) if total_linhas else 1
+    if pagina < 1:
+        pagina = 1
+    if total_linhas and pagina > total_paginas:
+        pagina = total_paginas
     
     inicio = (pagina - 1) * por_pagina
     fim = inicio + por_pagina
+    df_paginado = df.iloc[inicio:fim] if total_linhas else df
     
-    df_paginado = df.iloc[inicio:fim]
+    # String de query com filtros para reutilizar em links de paginação
+    q_parts = []
+    for r in filtros_rows:
+        if r.get('col'):
+            q_parts.append(('f_c', r['col']))
+            q_parts.append(('f_o', r.get('op', '==')))
+            if r.get('op') not in ('is null', 'is not null'):
+                q_parts.append(('f_v', r.get('val', '')))
+            else:
+                q_parts.append(('f_v', ''))
+    filtro_query = urlencode(q_parts) if q_parts else ''
     
     return render_template(
         'download/dados.html',
@@ -204,11 +295,15 @@ def ver_dados():
         total_paginas=total_paginas,
         total_linhas=total_linhas,
         por_pagina=por_pagina,
-        colunas=df.columns.tolist()
+        colunas=colunas,
+        filtros_rows=filtros_rows,
+        filtro_query=filtro_query,
+        condicoes_ativas=len(condicoes) > 0,
     )
 
 
 @bp_download.route('/api/status')
+@permission_required_or_admin('download.ver')
 def api_status():
     """API para verificar status dos arquivos. Usado por dashboards para atualizar após download."""
     caminho_arquivo = os.path.abspath("download/convertido_tabela.xlsx")
@@ -242,6 +337,7 @@ def api_status():
 
 
 @bp_download.route('/config', methods=['GET', 'POST'])
+@permission_required_or_admin('download.config')
 def config_download_automatico():
     """Configurar download automático"""
     config = ConfiguracaoDownload.query.first()
@@ -284,6 +380,7 @@ def config_download_automatico():
 
 
 @bp_download.route('/api/config')
+@permission_required_or_admin('download.config')
 def api_config():
     """API para obter configuração atual"""
     config = ConfiguracaoDownload.query.first()

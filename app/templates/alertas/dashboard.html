@@ -82,16 +82,24 @@
 .alertas-dashboard-wrap .alerta-conteudo-direita small {
     font-size: 1rem;
 }
+.alertas-dashboard-wrap .alerta-item-dashboard,
+.alertas-dashboard-wrap .alerta-item-dashboard .alerta-titulo,
+.alertas-dashboard-wrap .alerta-item-dashboard p,
+.alertas-dashboard-wrap .alerta-item-dashboard small,
+.alertas-dashboard-wrap .alerta-item-dashboard .alerta-datetime,
+.alertas-dashboard-wrap .alerta-item-dashboard .alerta-metadata {
+    color: #fff !important;
+}
 .alertas-dashboard-wrap .alerta-metadata {
     font-size: 0.75rem;
-    opacity: 0.9;
+    opacity: 1;
 }
 .alertas-dashboard-wrap .alerta-metadata .bi {
     font-size: 0.75rem !important;
 }
 .alertas-dashboard-wrap .alerta-datetime {
     font-size: 0.75rem;
-    opacity: 0.9;
+    opacity: 1;
 }
 body.alertas-dashboard-page { background: #000 !important; }
 body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
@@ -118,9 +126,11 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
         <a href="{{ url_for('alertas.log') }}" class="btn btn-info btn-sm">
             <i class="bi bi-clock-history"></i> Log
         </a>
+        {% if current_user.is_admin() or current_user.tem_permissao('alertas.config') %}
         <a href="{{ url_for('alertas.config') }}" class="btn btn-secondary btn-sm">
             <i class="bi bi-gear"></i> Configurar
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -137,7 +147,7 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
                            style="color: {{ alerta.cor_tipo or '#ff3b30' }}; font-size: 1.5rem;"></i>
                         <div>
                             <h4 class="mb-0 fw-bold alerta-titulo">{{ alerta.titulo.split(' - ')[0] if ' - ' in alerta.titulo else alerta.titulo }}</h4>
-                            <small class="alerta-datetime text-muted d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
+                            <small class="alerta-datetime d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
                         </div>
                     </div>
                 </div>
@@ -147,7 +157,7 @@ body.alertas-dashboard-page.theme-light { background: #f5f5f7 !important; }
                         {% if alerta.detalhes %}
                         {% set detalhes = alerta.detalhes | from_json %}
                         {% if detalhes.numero_ocorrencia %}
-                        <small class="alerta-metadata text-muted d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
+                        <small class="alerta-metadata d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
                         {% endif %}
                         {% endif %}
                     </div>
@@ -321,7 +331,7 @@ document.addEventListener('submit', function(e) {
                     '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
                     '<i class="bi bi-' + (a.tipo_alerta_icone || 'exclamation-triangle') + ' me-2 flex-shrink-0" style="color:' + (a.tipo_alerta_cor || '#ff3b30') + '; font-size: 1.5rem;"></i>' +
                     '<div><h4 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h4>' +
-                    '<small class="alerta-datetime text-muted d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                    '<small class="alerta-datetime d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
                     '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center alerta-conteudo-direita"><div><p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
                     '<form method="POST" action="/alertas/resolver/' + a.id + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual"><button type="submit" class="btn btn-sm rounded-circle btn-success" title="Resolver"><span class="fw-bold">M</span></button></form></div></div></div>';
                 var empty = list.querySelector('.alert-info');

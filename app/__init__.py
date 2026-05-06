@@ -1,10 +1,12 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
 from app.config import Config
 from app.socketio_alertas import socketio
 import logging
 
 db = SQLAlchemy()
+login_manager = LoginManager()
 
 # Configurar logging
 logging.basicConfig(
@@ -63,8 +65,19 @@ def create_app():
     app.jinja_env.filters['gray_gradient'] = gray_gradient_hex
 
     db.init_app(app)
-    
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.login'
+    login_manager.login_message = 'Faça login para acessar esta página.'
+    login_manager.login_message_category = 'warning'
+
+    from app.models import User
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
     # Registrar blueprints
+    from app.routes_auth import bp_auth
+    app.register_blueprint(bp_auth, url_prefix='/auth')
     from app.routes import bp
     app.register_blueprint(bp)
     
@@ -79,7 +92,20 @@ def create_app():
     
     from app.routes_alertas import bp_alertas
     app.register_blueprint(bp_alertas)
-    
+
+    from app.routes_usuarios import bp_usuarios
+    app.register_blueprint(bp_usuarios)
+
+    from flask import request
+    from flask_login import current_user
+
+    @app.before_request
+    def exigir_login():
+        if request.endpoint and request.endpoint not in ('auth.login', 'static', 'main.favicon'):
+            if not current_user.is_authenticated:
+                from flask import redirect, url_for
+                return redirect(url_for('auth.login', next=request.url))
+
     with app.app_context():
         # Criar tabelas do banco de dados (se houver modelos)
         db.create_all()
@@ -116,6 +142,12 @@ def create_app():
                         conn.execute(text("ALTER TABLE indicador ADD COLUMN grafico_meta_cor VARCHAR(20) DEFAULT '#ffc107'"))
                     if 'grafico_meta_estilo' not in cols:
                         conn.execute(text("ALTER TABLE indicador ADD COLUMN grafico_meta_estilo VARCHAR(20) DEFAULT 'dashed'"))
+                    if 'grafico_meta_operador' not in cols:
+                        conn.execute(text("ALTER TABLE indicador ADD COLUMN grafico_meta_operador VARCHAR(10) DEFAULT '<='"))
+                    if 'grafico_meta_cor_abaixo' not in cols:
+                        conn.execute(text("ALTER TABLE indicador ADD COLUMN grafico_meta_cor_abaixo VARCHAR(20) DEFAULT '#34c759'"))
+                    if 'grafico_meta_cor_acima' not in cols:
+                        conn.execute(text("ALTER TABLE indicador ADD COLUMN grafico_meta_cor_acima VARCHAR(20) DEFAULT '#ff3b30'"))
                     conn.commit()
         except Exception as e:
             logging.getLogger(__name__).warning("Migração indicador: %s", e)
@@ -190,7 +222,62 @@ def create_app():
                 db.create_all()
         except Exception as e:
             logging.getLogger(__name__).warning("Migração dashboard alertas: %s", e)
-        
+
+        # Seed de autenticação: permissões, perfil Administrador e usuário administrador
+        try:
+            from app.models import User, Role, Permission
+            from werkzeug.security import generate_password_hash
+            import os
+            db.create_all()
+            # Permissões padrão (configuráveis depois pelo admin)
+            permissoes_padrao = [
+                ('admin', 'Administrador', 'Acesso total; criar usuários, resetar senhas e gerenciar perfis'),
+                ('download.ver', 'Download - Ver', 'Visualizar página de download'),
+                ('download.config', 'Download - Configurar', 'Configurar download automático'),
+                ('indicadores.ver', 'Indicadores - Ver', 'Visualizar indicadores e painel'),
+                ('indicadores.editar', 'Indicadores - Editar', 'Criar e editar indicadores'),
+                ('dashboards.ver', 'Dashboards - Ver', 'Visualizar dashboards'),
+                ('dashboards.editar', 'Dashboards - Editar', 'Criar e editar dashboards'),
+                ('alertas.ver', 'Alertas - Ver', 'Visualizar alertas'),
+                ('alertas.config', 'Alertas - Configurar', 'Configurar alertas'),
+                ('usuarios.ver', 'Usuários - Ver', 'Listar usuários'),
+                ('usuarios.criar', 'Usuários - Criar/Editar', 'Criar e editar usuários'),
+                ('perfis.gerenciar', 'Perfis - Gerenciar', 'Gerenciar perfis e permissões'),
+            ]
+            for codigo, nome, descricao in permissoes_padrao:
+                if Permission.query.filter_by(codigo=codigo).first() is None:
+                    db.session.add(Permission(codigo=codigo, nome=nome, descricao=descricao))
+            db.session.commit()
+            # Perfil Administrador com todas as permissões
+            role_admin = Role.query.filter_by(nome='Administrador').first()
+            if role_admin is None:
+                role_admin = Role(nome='Administrador', descricao='Acesso total ao sistema')
+                db.session.add(role_admin)
+                db.session.flush()
+                for p in Permission.query.all():
+                    role_admin.permissions.append(p)
+                db.session.commit()
+            # Usuário administrador inicial (senha = CPF)
+            if User.query.filter_by(username='administrador').first() is None:
+                cpf_admin = os.environ.get('ADMIN_CPF', '00000000000').strip()
+                cpf_admin = ''.join(c for c in cpf_admin if c.isdigit()) or '00000000000'
+                admin_role = Role.query.filter_by(nome='Administrador').first()
+                if admin_role:
+                    u = User(
+                        username='administrador',
+                        nome_completo='Administrador',
+                        cpf=cpf_admin,
+                        crm='N/A',
+                        password_hash=generate_password_hash(cpf_admin),
+                        role_id=admin_role.id,
+                        ativo=True
+                    )
+                    db.session.add(u)
+                    db.session.commit()
+                    logging.getLogger(__name__).info('Usuário administrador criado. Login: administrador, Senha: CPF (configurado em ADMIN_CPF ou 00000000000).')
+        except Exception as e:
+            logging.getLogger(__name__).warning("Seed autenticação: %s", e)
+
         # Iniciar scheduler de downloads automáticos
         from app.download_scheduler import iniciar_scheduler
         iniciar_scheduler(app)

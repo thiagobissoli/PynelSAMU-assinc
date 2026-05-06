@@ -78,10 +78,12 @@ def _path_servico_sem_espacos(driver_path):
     """Se o caminho tem espaço, copia para um path sem espaço. No macOS evita /tmp (SIGKILL -9)."""
     if not driver_path or not os.path.exists(driver_path):
         return driver_path
-    if " " not in driver_path:
-        return driver_path
-    # Usar diretório no home (evita /tmp onde o macOS pode matar o processo com -9)
+    # No macOS: executar chromedriver a partir de ~/.pynel_samu evita SIGKILL -9 quando
+    # o binário está em .wdm dentro do projeto (Gatekeeper/segurança).
     base = os.path.expanduser("~/.pynel_samu")
+    use_copy = " " in driver_path or (platform.system() == "Darwin" and ".wdm" in os.path.normpath(driver_path))
+    if not use_copy:
+        return driver_path
     try:
         os.makedirs(base, exist_ok=True)
     except Exception as e:
@@ -89,7 +91,6 @@ def _path_servico_sem_espacos(driver_path):
         return driver_path
     dest = os.path.join(base, "chromedriver")
     try:
-        # Remover cópia antiga para evitar arquivo corrompido ou bloqueado
         if os.path.exists(dest):
             try:
                 os.remove(dest)
@@ -99,10 +100,10 @@ def _path_servico_sem_espacos(driver_path):
         os.chmod(dest, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
         if platform.system() == "Darwin":
             corrigir_permissoes_chromedriver_macos(dest)
-        logger.info(f"ChromeDriver copiado para path sem espaço: {dest}")
+        logger.info(f"ChromeDriver copiado para {dest}")
         return dest
     except Exception as e:
-        logger.warning(f"Não foi possível copiar chromedriver para path sem espaço: {e}")
+        logger.warning(f"Não foi possível copiar chromedriver: {e}")
         return driver_path
 
 

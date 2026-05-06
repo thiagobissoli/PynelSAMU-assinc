@@ -10,6 +10,7 @@ from app import db
 from app.models import Dashboard, Indicador, DashboardWidget, Alerta, ConfiguracaoDownload, ConfiguracaoAlerta
 from app.calculo_indicadores import calcular_indicador, calcular_variacao_percentual
 from app.cache_indicadores import get_or_calc_indicadores
+from app.auth_utils import permission_required_or_admin
 import logging
 import json
 
@@ -34,6 +35,7 @@ def _alertas_para_dashboard(dashboard):
 
 
 @bp_dashboards.route('/')
+@permission_required_or_admin('dashboards.ver')
 def index():
     """Lista de dashboards"""
     dashboards = Dashboard.query.filter_by(ativo=True).order_by(Dashboard.ordem, Dashboard.nome).all()
@@ -41,6 +43,7 @@ def index():
 
 
 @bp_dashboards.route('/create', methods=['GET', 'POST'])
+@permission_required_or_admin('dashboards.editar')
 def create():
     """Criar novo dashboard"""
     if request.method == 'POST':
@@ -99,6 +102,7 @@ def create():
 
 
 @bp_dashboards.route('/edit/<int:id>', methods=['GET', 'POST'])
+@permission_required_or_admin('dashboards.editar')
 def edit(id):
     """Editar dashboard"""
     dashboard = Dashboard.query.get_or_404(id)
@@ -157,6 +161,7 @@ def edit(id):
 
 
 @bp_dashboards.route('/delete/<int:id>', methods=['POST'])
+@permission_required_or_admin('dashboards.editar')
 def delete(id):
     """Deletar dashboard"""
     dashboard = Dashboard.query.get_or_404(id)
@@ -173,6 +178,7 @@ def delete(id):
 
 
 @bp_dashboards.route('/view/<int:id>')
+@permission_required_or_admin('dashboards.ver')
 def view(id):
     """Visualizar dashboard (estilo app Bolsa) - usa cache de indicadores"""
     # OTIMIZAÇÃO: eager loading de todas as relationships em UMA query
@@ -227,6 +233,7 @@ def view(id):
 
 
 @bp_dashboards.route('/<int:id>/alertas-manual', methods=['GET', 'POST'])
+@permission_required_or_admin('dashboards.editar')
 def alertas_manual(id):
     """Página para gerenciar alertas manuais do dashboard (supervisor)."""
     dashboard = Dashboard.query.get_or_404(id)
@@ -288,6 +295,7 @@ def alertas_manual(id):
 
 
 @bp_dashboards.route('/widgets/<int:id>')
+@permission_required_or_admin('dashboards.ver')
 def widgets(id):
     """Visualizar dashboard em modo widgets (estilo iPhone) - usa cache de indicadores.
     
@@ -352,6 +360,7 @@ def widgets(id):
 
 
 @bp_dashboards.route('/api/dados/<int:id>')
+@permission_required_or_admin('dashboards.ver')
 def api_dados(id):
     """API para obter indicadores do dashboard (cache). ?mode=lista|widgets"""
     dashboard = Dashboard.query.options(
@@ -366,6 +375,7 @@ def api_dados(id):
 
 
 @bp_dashboards.route('/api/indicador/<int:id>')
+@permission_required_or_admin('dashboards.ver')
 def api_indicador(id):
     """API para obter dados de um indicador específico"""
     indicador = Indicador.query.get_or_404(id)
@@ -375,6 +385,7 @@ def api_indicador(id):
 
 
 @bp_dashboards.route('/widgets/config/<int:id>', methods=['GET', 'POST'])
+@permission_required_or_admin('dashboards.editar')
 def widgets_config(id):
     """Configurar widgets do dashboard"""
     dashboard = Dashboard.query.get_or_404(id)

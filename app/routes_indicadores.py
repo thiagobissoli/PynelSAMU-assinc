@@ -7,6 +7,7 @@ from app import db
 from app.models import Indicador
 from app.calculo_indicadores import calcular_indicador, calcular_todos_indicadores
 from app.indicadores import carregar_dados as carregar_dados_indicadores
+from app.auth_utils import permission_required_or_admin
 import json
 import logging
 
@@ -38,6 +39,7 @@ def _parse_float_safe(s):
 
 
 @bp_indicadores.route('/api/ordem/<int:id>', methods=['PATCH'])
+@permission_required_or_admin('indicadores.editar')
 def api_update_ordem(id):
     """Atualiza apenas a ordem do indicador (edição inline)."""
     indicador = Indicador.query.get_or_404(id)
@@ -57,6 +59,7 @@ def api_update_ordem(id):
 
 
 @bp_indicadores.route('/api/coluna-valores')
+@permission_required_or_admin('indicadores.ver')
 def coluna_valores():
     """Retorna valores distintos da planilha para a coluna informada (query: coluna=NomeColuna)."""
     coluna = (request.args.get('coluna') or '').strip().strip('\ufeff')  # BOM e espaços
@@ -86,6 +89,7 @@ def coluna_valores():
 
 
 @bp_indicadores.route('/config')
+@permission_required_or_admin('indicadores.ver')
 def config():
     """Página de configuração de indicadores"""
     indicadores = Indicador.query.order_by(Indicador.ordem, Indicador.nome).all()
@@ -109,6 +113,7 @@ def config():
 
 
 @bp_indicadores.route('/create', methods=['GET', 'POST'])
+@permission_required_or_admin('indicadores.editar')
 def create():
     """Criar novo indicador"""
     if request.method == 'POST':
@@ -218,6 +223,9 @@ def create():
                 grafico_meta_valor=_parse_float_safe(request.form.get('grafico_meta_valor', '')) if request.form.get('grafico_meta_habilitado') == 'on' else None,
                 grafico_meta_cor=(request.form.get('grafico_meta_cor', '') or '#ffc107').strip(),
                 grafico_meta_estilo=(request.form.get('grafico_meta_estilo', '') or 'dashed').strip()[:20],
+                grafico_meta_operador=((request.form.get('grafico_meta_operador', '') or '<=').strip() if request.form.get('grafico_meta_habilitado') == 'on' else '<='),
+                grafico_meta_cor_abaixo=((request.form.get('grafico_meta_cor_abaixo', '') or '#34c759').strip() if request.form.get('grafico_meta_habilitado') == 'on' else '#34c759'),
+                grafico_meta_cor_acima=((request.form.get('grafico_meta_cor_acima', '') or '#ff3b30').strip() if request.form.get('grafico_meta_habilitado') == 'on' else '#ff3b30'),
                 tendencia_inversa=tendencia_inversa,
                 cor_subida=cor_subida,
                 cor_descida=cor_descida,
@@ -244,6 +252,7 @@ def create():
 
 
 @bp_indicadores.route('/edit/<int:id>', methods=['GET', 'POST'])
+@permission_required_or_admin('indicadores.editar')
 def edit(id):
     """Editar indicador existente"""
     indicador = Indicador.query.get_or_404(id)
@@ -310,6 +319,15 @@ def edit(id):
             indicador.grafico_meta_valor = _parse_float_safe(request.form.get('grafico_meta_valor', '')) if indicador.grafico_meta_habilitado else None
             indicador.grafico_meta_cor = (request.form.get('grafico_meta_cor', '') or '#ffc107').strip()
             indicador.grafico_meta_estilo = (request.form.get('grafico_meta_estilo', '') or 'dashed').strip()[:20]
+            indicador.grafico_meta_operador = (request.form.get('grafico_meta_operador', '') or '<=').strip()
+            if indicador.grafico_meta_operador not in ('<=', '>='):
+                indicador.grafico_meta_operador = '<='
+            indicador.grafico_meta_cor_abaixo = (request.form.get('grafico_meta_cor_abaixo', '') or '#34c759').strip()
+            indicador.grafico_meta_cor_acima = (request.form.get('grafico_meta_cor_acima', '') or '#ff3b30').strip()
+            if not indicador.grafico_meta_habilitado:
+                indicador.grafico_meta_operador = '<='
+                indicador.grafico_meta_cor_abaixo = '#34c759'
+                indicador.grafico_meta_cor_acima = '#ff3b30'
             
             # Configuração de tendência
             indicador.tendencia_inversa = request.form.get('tendencia_inversa') == 'on'
@@ -364,6 +382,7 @@ def edit(id):
 
 
 @bp_indicadores.route('/delete/<int:id>', methods=['POST'])
+@permission_required_or_admin('indicadores.editar')
 def delete(id):
     """Deletar indicador"""
     indicador = Indicador.query.get_or_404(id)
@@ -380,6 +399,7 @@ def delete(id):
 
 
 @bp_indicadores.route('/duplicate/<int:id>')
+@permission_required_or_admin('indicadores.editar')
 def duplicate(id):
     """Duplicar indicador, adicionando ' copy' ao nome"""
     original = Indicador.query.get_or_404(id)
@@ -425,6 +445,7 @@ def duplicate(id):
 
 
 @bp_indicadores.route('/painel')
+@permission_required_or_admin('indicadores.ver')
 def painel():
     """Painel com todos os indicadores calculados"""
     resultados = calcular_todos_indicadores()
@@ -449,6 +470,7 @@ def painel():
 
 
 @bp_indicadores.route('/calcular/<int:id>')
+@permission_required_or_admin('indicadores.ver')
 def calcular(id):
     """Calcular um indicador específico (API)"""
     indicador = Indicador.query.get_or_404(id)
@@ -457,6 +479,7 @@ def calcular(id):
 
 
 @bp_indicadores.route('/testar', methods=['POST'])
+@permission_required_or_admin('indicadores.editar')
 def testar():
     """Testar cálculo de indicador antes de salvar (API)"""
     try:
@@ -483,6 +506,7 @@ def testar():
 
 
 @bp_indicadores.route('/grafico/<int:id>')
+@permission_required_or_admin('indicadores.ver')
 def grafico(id):
     """Retorna dados do gráfico de um indicador (API) - usa cache."""
     indicador = Indicador.query.get_or_404(id)
@@ -492,6 +516,7 @@ def grafico(id):
 
 
 @bp_indicadores.route('/graficos/batch', methods=['POST'])
+@permission_required_or_admin('indicadores.ver')
 def graficos_batch():
     """Retorna dados de gráficos de MÚLTIPLOS indicadores em uma única chamada.
     

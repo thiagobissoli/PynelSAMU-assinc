@@ -318,6 +318,14 @@
                                     <small class="form-text text-muted">Use 1,5 ou 1:30 para 1 min 30 seg</small>
                                 </div>
                                 <div class="col-md-3">
+                                    <label for="grafico_meta_operador" class="form-label small mb-0">Dentro da meta quando</label>
+                                    <select class="form-select form-select-sm" id="grafico_meta_operador" name="grafico_meta_operador">
+                                        <option value="<=" {% if indicador and (indicador.grafico_meta_operador or '<=') == '<=' %}selected{% endif %}>≤ (menor ou igual)</option>
+                                        <option value=">=" {% if indicador and (indicador.grafico_meta_operador or '') == '>=' %}selected{% endif %}>≥ (maior ou igual)</option>
+                                    </select>
+                                    <small class="form-text text-muted">Define se “abaixo” ou “acima” é considerado dentro da meta.</small>
+                                </div>
+                                <div class="col-md-3">
                                     <label class="form-label small mb-0">Cor</label>
                                     <div class="cor-swatches d-flex flex-wrap" data-input="grafico_meta_cor">
                                         <button type="button" class="cor-swatch" data-value="#ffc107" style="background:#ffc107" title="#ffc107"></button>
@@ -351,6 +359,38 @@
                                         </ul>
                                     </div>
                                     <input type="hidden" name="grafico_meta_estilo" id="grafico_meta_estilo" value="{{ indicador.grafico_meta_estilo or 'dashed' if indicador else 'dashed' }}">
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end mt-2">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Cor abaixo da meta</label>
+                                    <div class="cor-swatches d-flex flex-wrap" data-input="grafico_meta_cor_abaixo">
+                                        <button type="button" class="cor-swatch" data-value="#34c759" style="background:#34c759" title="#34c759"></button>
+                                        <button type="button" class="cor-swatch" data-value="#28a745" style="background:#28a745" title="#28a745"></button>
+                                        <button type="button" class="cor-swatch" data-value="#20c997" style="background:#20c997" title="#20c997"></button>
+                                        <button type="button" class="cor-swatch" data-value="#0d6efd" style="background:#0d6efd" title="#0d6efd"></button>
+                                        <button type="button" class="cor-swatch" data-value="#ffc107" style="background:#ffc107" title="#ffc107"></button>
+                                        <button type="button" class="cor-swatch" data-value="#dc3545" style="background:#dc3545" title="#dc3545"></button>
+                                        <button type="button" class="cor-swatch" data-value="#6c757d" style="background:#6c757d" title="#6c757d"></button>
+                                    </div>
+                                    <input type="hidden" name="grafico_meta_cor_abaixo" id="grafico_meta_cor_abaixo" value="{{ indicador.grafico_meta_cor_abaixo or '#34c759' if indicador else '#34c759' }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Cor acima da meta</label>
+                                    <div class="cor-swatches d-flex flex-wrap" data-input="grafico_meta_cor_acima">
+                                        <button type="button" class="cor-swatch" data-value="#ff3b30" style="background:#ff3b30" title="#ff3b30"></button>
+                                        <button type="button" class="cor-swatch" data-value="#dc3545" style="background:#dc3545" title="#dc3545"></button>
+                                        <button type="button" class="cor-swatch" data-value="#fd7e14" style="background:#fd7e14" title="#fd7e14"></button>
+                                        <button type="button" class="cor-swatch" data-value="#ffc107" style="background:#ffc107" title="#ffc107"></button>
+                                        <button type="button" class="cor-swatch" data-value="#0d6efd" style="background:#0d6efd" title="#0d6efd"></button>
+                                        <button type="button" class="cor-swatch" data-value="#6c757d" style="background:#6c757d" title="#6c757d"></button>
+                                    </div>
+                                    <input type="hidden" name="grafico_meta_cor_acima" id="grafico_meta_cor_acima" value="{{ indicador.grafico_meta_cor_acima or '#ff3b30' if indicador else '#ff3b30' }}">
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="alert alert-info py-2 mb-0 small">
+                                        <strong>Dica:</strong> para “tempo de resposta”, normalmente <strong>abaixo</strong> da meta é bom (verde) e acima é ruim (vermelho). Para “produção/quantidade”, pode ser o contrário — ajuste o operador.
+                                    </div>
                                 </div>
                             </div>
                         </div>

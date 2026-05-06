@@ -230,6 +230,73 @@
                 </div>
             </div>
 
+            <!-- Saturação multi-unidade (100%: cada unidade listada com status alvo em linhas distintas) -->
+            <div class="card mt-4" id="cardSaturacaoMulti">
+                <div class="card-header text-white" style="background-color: #6f42c1;">
+                    <h5 class="mb-0"><i class="bi bi-hospital"></i> Saturação multi-unidade</h5>
+                </div>
+                <div class="card-body">
+                    {% if config %}{% set sat_cfg = config.get_configuracoes_dict() %}{% else %}{% set sat_cfg = {} %}{% endif %}
+                    {% set sat_val_inicial = sat_cfg.get('valor', sat_cfg.get('valor_status', '')) %}
+                    <input type="hidden" name="saturacao_block_sent" value="1">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="regra_saturacao_multi_unidade" name="regra_saturacao_multi_unidade"
+                               {% if config and sat_cfg.get('regra') == 'saturacao_multi_unidade' %}checked{% endif %}>
+                        <label class="form-check-label" for="regra_saturacao_multi_unidade">
+                            Usar regra <strong>saturacao_multi_unidade</strong> (alerta quando <em>cada</em> unidade listada tiver pelo menos uma linha que satisfaça coluna + operador + valor)
+                        </label>
+                    </div>
+                    <p class="small text-muted">A coluna de unidade no dado é sempre <strong>Unidade</strong>. Dispara quando todas as unidades monitoradas têm pelo menos uma linha no período que atende à condição (Coluna e Valor como em Condições de Filtro). Opcional: <strong>Sumir automaticamente quando resolvido</strong>.</p>
+                    <div class="mb-3">
+                        <label for="saturacao_unidades_texto" class="form-label">Unidades (uma por linha ou separadas por vírgula)</label>
+                        <textarea class="form-control font-monospace small" id="saturacao_unidades_texto" name="saturacao_unidades_texto" rows="3" placeholder="USB 52 - CARIACICA&#10;USB 54 - CARIACICA">{% if config and sat_cfg.get('unidades') %}{% set u = sat_cfg.get('unidades') %}{% if u is string %}{{ u }}{% else %}{{ u | join('\n') }}{% endif %}{% endif %}</textarea>
+                    </div>
+                    <div class="row align-items-end">
+                        <div class="col-md-4 mb-3">
+                            <label for="saturacao_coluna" class="form-label">Coluna</label>
+                            <select class="form-select saturacao-coluna" id="saturacao_coluna" name="saturacao_coluna">
+                                <option value="">Selecione...</option>
+                                {% for coluna in colunas %}
+                                <option value="{{ coluna }}" {% if config and (sat_cfg.get('coluna') == coluna or (not sat_cfg.get('coluna') and sat_cfg.get('coluna_status') == coluna)) %}selected{% endif %}>{{ coluna }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="saturacao_operador" class="form-label">Operador</label>
+                            <select class="form-select" id="saturacao_operador" name="saturacao_operador">
+                                {% set sat_op = sat_cfg.get('operador', '==') %}
+                                <option value="==" {% if sat_op == '==' %}selected{% endif %}>Igual (==)</option>
+                                <option value="!=" {% if sat_op == '!=' %}selected{% endif %}>Diferente (!=)</option>
+                                <option value=">" {% if sat_op == '>' %}selected{% endif %}>Maior (&gt;)</option>
+                                <option value="<" {% if sat_op == '<' %}selected{% endif %}>Menor (&lt;)</option>
+                                <option value=">=" {% if sat_op == '>=' %}selected{% endif %}>≥</option>
+                                <option value="<=" {% if sat_op == '<=' %}selected{% endif %}>≤</option>
+                                <option value="in" {% if sat_op == 'in' %}selected{% endif %}>Em lista (in)</option>
+                                <option value="not in" {% if sat_op == 'not in' %}selected{% endif %}>Fora da lista (not in)</option>
+                                <option value="contains" {% if sat_op == 'contains' %}selected{% endif %}>Contém</option>
+                                <option value="not contains" {% if sat_op == 'not contains' %}selected{% endif %}>Não contém</option>
+                                <option value="startswith" {% if sat_op == 'startswith' %}selected{% endif %}>Começa com</option>
+                                <option value="endswith" {% if sat_op == 'endswith' %}selected{% endif %}>Termina com</option>
+                                <option value="is null" {% if sat_op == 'is null' %}selected{% endif %}>É nulo</option>
+                                <option value="is not null" {% if sat_op == 'is not null' %}selected{% endif %}>Não é nulo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label for="saturacao_valor" class="form-label">Valor</label>
+                            <select class="form-select saturacao-valor-select" id="saturacao_valor" name="saturacao_valor" data-valor-inicial="{{ sat_val_inicial | e }}">
+                                <option value="">Selecione ou digite...</option>
+                                {% if sat_val_inicial %}<option value="{{ sat_val_inicial }}" selected>{{ sat_val_inicial }}</option>{% endif %}
+                            </select>
+                            <small class="form-text text-muted">Valores carregados conforme a coluna escolhida (como em Condições de Filtro). Vazio com == usa o padrão &quot;Em atendimento&quot; onde aplicável. Em &quot;É nulo&quot; / &quot;Não é nulo&quot; o valor é ignorado.</small>
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label for="saturacao_mensagem_alerta" class="form-label">Mensagem do alerta (opcional)</label>
+                        <textarea class="form-control" id="saturacao_mensagem_alerta" name="saturacao_mensagem_alerta" rows="2" placeholder="Deixe em branco para mensagem automática">{% if config %}{{ sat_cfg.get('mensagem_alerta', '') }}{% endif %}</textarea>
+                    </div>
+                </div>
+            </div>
+
             <!-- Coluna de Dados (opcional quando Tipo de Cálculo está definido) -->
             <div class="card mt-4" id="card_coluna_dados">
                 <div class="card-header bg-success text-white">
@@ -495,6 +562,66 @@
         $('.condicao-item').each(function() {
             loadValoresAndInitSelect2($(this));
         });
+
+        function loadSaturacaoValores($wrap) {
+            var $coluna = $wrap.find('.saturacao-coluna');
+            var $valor = $wrap.find('.saturacao-valor-select');
+            var col = ($coluna.val() || '').trim();
+            var currentVal = $valor.val() || $valor.data('valor-inicial') || '';
+            if (!$coluna.data('select2')) {
+                $coluna.select2({
+                    theme: 'bootstrap-5',
+                    width: '100%',
+                    placeholder: 'Selecione ou busque a coluna...',
+                    allowClear: true
+                });
+            }
+            if ($valor.data('select2')) { try { $valor.select2('destroy'); } catch(e) {} }
+            $valor.off('select2:select');
+            $valor.empty().append('<option value="">Selecione ou digite...</option>');
+            if (!col) {
+                $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Selecione ou digite...' });
+                return;
+            }
+            $.ajax({
+                url: API_COLUNA_VALORES,
+                data: { coluna: col },
+                dataType: 'json',
+                success: function(vals) {
+                    if (!Array.isArray(vals)) vals = [];
+                    $valor.empty().append('<option value="">Selecione ou digite...</option>');
+                    vals.forEach(function(v) {
+                        var opt = $('<option></option>').attr('value', v).text(v);
+                        if (v === currentVal) opt.prop('selected', true);
+                        $valor.append(opt);
+                    });
+                    if (currentVal && $valor.find('option[value="' + String(currentVal).replace(/"/g, '\\"') + '"]').length === 0) {
+                        $valor.append($('<option></option>').attr('value', currentVal).text(currentVal).prop('selected', true));
+                    }
+                    $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Selecione ou digite...' });
+                },
+                error: function() {
+                    $valor.select2({ theme: 'bootstrap-5', width: '100%', tags: true, placeholder: 'Erro ao carregar.' });
+                }
+            });
+        }
+        var $satCard = $('#cardSaturacaoMulti');
+        if ($satCard.length) {
+            $satCard.find('.saturacao-coluna').each(function() {
+                if (!$(this).data('select2')) {
+                    $(this).select2({
+                        theme: 'bootstrap-5',
+                        width: '100%',
+                        placeholder: 'Selecione ou busque a coluna...',
+                        allowClear: true
+                    });
+                }
+            });
+            $satCard.on('change', '.saturacao-coluna', function() {
+                loadSaturacaoValores($satCard);
+            });
+            loadSaturacaoValores($satCard);
+        }
     });
     window.loadValoresAndInitSelect2 = function(rowEl) {
         var $r = (typeof jQuery !== 'undefined' && rowEl) ? (rowEl.jquery ? rowEl : jQuery(rowEl)) : null;

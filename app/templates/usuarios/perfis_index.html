@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Perfis de acesso{% endblock %}
+{% block content %}
+<h4><i class="bi bi-shield-lock"></i> Perfis de acesso</h4>
+<p class="text-muted">Configure perfis e associe permissões. Os usuários recebem acesso conforme o perfil.</p>
+<p>
+    <a class="btn btn-primary" href="{{ url_for('usuarios.perfil_novo') }}"><i class="bi bi-plus-lg"></i> Novo perfil</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('usuarios.index') }}"><i class="bi bi-people"></i> Usuários</a>
+</p>
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Perfil</th>
+                <th>Descrição</th>
+                <th>Permissões</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in roles %}
+            <tr>
+                <td>{{ r.nome }}</td>
+                <td>{{ r.descricao or '-' }}</td>
+                <td>
+                    {% for p in r.permissions %}
+                    <span class="badge bg-secondary me-1">{{ p.codigo }}</span>
+                    {% else %}
+                    <span class="text-muted">Nenhuma</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('usuarios.perfil_editar', id=r.id) }}">Editar</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">Nenhum perfil. Crie o perfil &quot;Administrador&quot; e associe a permissão &quot;admin&quot; para gerenciar o sistema.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

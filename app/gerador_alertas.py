@@ -146,6 +146,8 @@ def gerar_alertas_automaticos():
                 alertas_gerados += gerar_alerta_alta_demanda(config, df)
             elif tipo_codigo == 'tempo_resposta_elevado':
                 alertas_gerados += gerar_alerta_tempo_resposta_elevado(config, df)
+            elif tipo_codigo == 'saturacao_multi_unidade' or config.get_configuracoes_dict().get('regra') == 'saturacao_multi_unidade':
+                alertas_gerados += gerar_alerta_saturacao_multi_unidade(config, df)
             else:
                 # Tipo customizado - usar lógica genérica
                 alertas_gerados += gerar_alerta_generico(config, df)
@@ -188,6 +190,8 @@ def _resolver_alertas_config(config, df):
         resolvidos = _resolver_multiplos_chamados(config, df, alertas_ativos)
     elif tipo_codigo in ('tempo_resposta_municipio', 'tempo_resposta_elevado'):
         resolvidos = _resolver_tempo_resposta(config, df, alertas_ativos)
+    elif tipo_codigo == 'saturacao_multi_unidade' or config.get_configuracoes_dict().get('regra') == 'saturacao_multi_unidade':
+        resolvidos = _resolver_saturacao_multi_unidade(config, df, alertas_ativos)
     else:
         resolvidos = _resolver_generico(config, df, alertas_ativos)
     return resolvidos
@@ -715,6 +719,201 @@ def gerar_alerta_tempo_resposta_elevado(config, df):
             return 1
     
     return 0
+
+
+def _normalizar_lista_unidades(cfg):
+    """Extrai lista de unidades (strings) da configuração."""
+    raw = cfg.get('unidades')
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [x.strip() for x in raw.replace('\n', ',').split(',') if x.strip()]
+    if isinstance(raw, list):
+        return [str(u).strip() for u in raw if str(u).strip()]
+    return []
+
+
+def _valor_condicao_para_aplicar(operador, valor):
+    """Normaliza valor para aplicar_condicao (lista em 'in', ignora em is null)."""
+    op = (operador or '==').strip()
+    if op in ('is null', 'is not null'):
+        return None
+    if op == 'in' and isinstance(valor, str) and ',' in valor:
+        return [x.strip() for x in valor.split(',') if x.strip()]
+    return valor
+
+
+def _condicao_ok_saturacao_texto(df, coluna, operador, val_ap):
+    """
+    Máscara booleana para a condição da regra saturacao_multi_unidade.
+    Para == e != em colunas não numéricas, compara texto sem diferenciar maiúsculas
+    (ex.: planilha com "Em Atendimento" e regra com "Em atendimento").
+    Demais casos delegam a aplicar_condicao.
+    """
+    if coluna not in df.columns:
+        return pd.Series([False] * len(df), index=df.index)
+    op = (operador or '==').strip() or '=='
+    serie = df[coluna]
+    if op in ('==', '!=') and not pd.api.types.is_numeric_dtype(serie):
+        s = serie.astype(str).str.strip()
+        v = str(val_ap).strip() if val_ap is not None else ''
+        eq = s.str.lower() == v.lower()
+        return eq if op == '==' else ~eq
+    if op == 'in' and isinstance(val_ap, list) and not pd.api.types.is_numeric_dtype(serie):
+        s = serie.astype(str).str.strip().str.lower()
+        norm = {str(x).strip().lower() for x in val_ap}
+        m = s.isin(norm)
+        return m
+    if op == 'not in' and isinstance(val_ap, list) and not pd.api.types.is_numeric_dtype(serie):
+        s = serie.astype(str).str.strip().str.lower()
+        norm = {str(x).strip().lower() for x in val_ap}
+        return ~s.isin(norm)
+    return aplicar_condicao(df, coluna, operador, val_ap)
+
+
+def _resolver_coluna_operador_valor_saturacao(cfg):
+    """
+    Coluna + operador + valor da condição por linha (compatível com coluna_status/valor_status legados).
+    Valor vazio com operadores que exigem valor vira o padrão 'Em atendimento' (exceto is null / is not null).
+    """
+    coluna = (cfg.get('coluna') or cfg.get('coluna_status') or 'status da ocorrência').strip()
+    operador = (cfg.get('operador') or '==').strip() or '=='
+    valor = cfg.get('valor')
+    if valor is None:
+        valor = cfg.get('valor_status')
+    if isinstance(valor, str) and valor.strip() == '' and operador not in ('is null', 'is not null'):
+        valor = 'Em atendimento'
+    if valor is None and operador not in ('is null', 'is not null'):
+        valor = 'Em atendimento'
+    return coluna, operador, valor
+
+
+def _avaliar_saturacao_multi_unidade(df, cfg):
+    """
+    Para cada unidade listada, verifica se existe pelo menos uma linha com
+    (coluna operador valor) satisfeito e coluna_unidade == unidade.
+    Retorna (todas_ok: bool, por_unidade: dict).
+    """
+    unidades = _normalizar_lista_unidades(cfg)
+    if not unidades:
+        return False, {}
+    col_c, op, val = _resolver_coluna_operador_valor_saturacao(cfg)
+    col_u = (cfg.get('coluna_unidade') or 'Unidade').strip()
+    if col_c not in df.columns or col_u not in df.columns:
+        logger.warning(
+            "saturacao_multi_unidade: colunas '%s' ou '%s' ausentes no DataFrame",
+            col_c, col_u,
+        )
+        return False, {}
+    val_ap = _valor_condicao_para_aplicar(op, val)
+    condicao_ok = _condicao_ok_saturacao_texto(df, col_c, op, val_ap)
+    por_unidade = {}
+    for u in unidades:
+        m_u = df[col_u].astype(str).str.strip().str.lower() == str(u).strip().lower()
+        por_unidade[u] = bool((condicao_ok & m_u).any())
+    todas_ok = all(por_unidade.values())
+    return todas_ok, por_unidade
+
+
+def gerar_alerta_saturacao_multi_unidade(config, df):
+    """
+    Dispara quando TODAS as unidades listadas têm pelo menos uma ocorrência
+    com status alvo (ex.: 'Em atendimento') no período filtrado — regra em múltiplas linhas.
+
+    configuracoes JSON (exemplo):
+      regra: saturacao_multi_unidade
+      unidades: ["USB 52 - CARIACICA", "USB 54 - CARIACICA"]
+      coluna, operador, valor (ex.: status da ocorrência, ==, Em atendimento)
+      coluna_unidade fixo na UI: Unidade
+      Legado: coluna_status + valor_status equivale a coluna + == + valor
+    Ou tipo do registro = saturacao_multi_unidade (mesmo efeito).
+    """
+    cfg = config.get_configuracoes_dict()
+    unidades = _normalizar_lista_unidades(cfg)
+    if not unidades:
+        logger.warning(f"saturacao_multi_unidade: defina 'unidades' na configuração {config.id}")
+        return 0
+
+    df_work = _filtrar_por_periodo(df, config.coluna_data_filtro, config.periodo_verificacao_horas)
+    condicoes = config.get_condicoes_dict()
+    if condicoes:
+        df_work = filtrar_dataframe(df_work, condicoes, None, None)
+    if df_work.empty:
+        logger.debug(f"saturacao_multi_unidade: sem linhas após filtros (config {config.id})")
+        return 0
+
+    todas_ok, por_unidade = _avaliar_saturacao_multi_unidade(df_work, cfg)
+    if not todas_ok:
+        return 0
+
+    if _alerta_existe_valor_identificado(config.id, 'saturacao_completa'):
+        return 0
+
+    col_c, op, val = _resolver_coluna_operador_valor_saturacao(cfg)
+    mensagem = (cfg.get('mensagem_alerta') or '').strip()
+    if not mensagem:
+        lista_u = ', '.join(unidades)
+        if op in ('is null', 'is not null'):
+            cond_txt = f'{col_c} {op}'
+        else:
+            cond_txt = f'{col_c} {op} {val!r}'
+        mensagem = (
+            f'100% saturação: todas as unidades monitoradas ({lista_u}) com {cond_txt} '
+            f'(coluna unidade: {(cfg.get("coluna_unidade") or "Unidade")}) no período das últimas {config.periodo_verificacao_horas} h.'
+        )
+
+    detalhes = {
+        'valor_identificado': 'saturacao_completa',
+        'tipo_verificacao': 'saturacao_multi_unidade',
+        'unidades': unidades,
+        'por_unidade': por_unidade,
+        'regra': 'saturacao_multi_unidade',
+        'coluna': col_c,
+        'operador': op,
+        'valor': val,
+    }
+    alerta = Alerta(
+        configuracao_alerta_id=config.id,
+        nome_tipo=config.nome,
+        icone_tipo=config.icone or 'truck',
+        cor_tipo=config.cor or '#ff3b30',
+        titulo=config.nome or 'Saturação multi-unidade',
+        mensagem=mensagem,
+        detalhes=json.dumps(detalhes, ensure_ascii=False),
+        prioridade=config.prioridade or 3,
+        origem='automatico',
+        status='ativo',
+        data_ocorrencia=datetime.now(brasilia_tz),
+    )
+    db.session.add(alerta)
+    db.session.commit()
+    _emit_alerta_criado(alerta)
+    logger.info(f"saturacao_multi_unidade: alerta criado (config {config.id})")
+    return 1
+
+
+def _resolver_saturacao_multi_unidade(config, df, alertas_ativos):
+    """Resolve alertas desta regra quando a saturação completa deixa de existir."""
+    cfg = config.get_configuracoes_dict()
+    df_work = _filtrar_por_periodo(df, config.coluna_data_filtro, config.periodo_verificacao_horas)
+    condicoes = config.get_condicoes_dict()
+    if condicoes:
+        df_work = filtrar_dataframe(df_work, condicoes, None, None)
+    todas_ok, _ = _avaliar_saturacao_multi_unidade(df_work, cfg) if not df_work.empty else (False, {})
+    if todas_ok:
+        return 0
+    resolvidos = 0
+    for alerta in alertas_ativos:
+        try:
+            det = alerta.get_detalhes_dict()
+            if det.get('valor_identificado') == 'saturacao_completa' or det.get('tipo_verificacao') == 'saturacao_multi_unidade':
+                alerta.status = 'resolvido'
+                alerta.resolvido_em = datetime.utcnow()
+                alerta.resolvido_por = 'Sistema'
+                resolvidos += 1
+        except Exception:
+            pass
+    return resolvidos
 
 
 def gerar_alerta_generico(config, df):

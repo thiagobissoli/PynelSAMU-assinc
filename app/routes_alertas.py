@@ -7,6 +7,7 @@ from app import db
 from app.models import ConfiguracaoAlerta, Alerta, ConfiguracaoAlertasSistema
 from app.gerador_alertas import gerar_alertas_automaticos
 from app.indicadores import carregar_dados as carregar_dados_indicadores
+from app.auth_utils import permission_required_or_admin
 import logging
 import json
 from datetime import datetime
@@ -34,6 +35,7 @@ def _deduplicar_alertas(alertas):
 
 
 @bp_alertas.route('/')
+@permission_required_or_admin('alertas.ver')
 def index():
     """Redireciona para o dashboard de alertas"""
     return redirect(url_for('alertas.dashboard'))
@@ -99,6 +101,7 @@ def _resolver_alertas_por_tempo():
 _ultimo_resolve_por_tempo = 0
 
 @bp_alertas.route('/api/ativos')
+@permission_required_or_admin('alertas.ver')
 def api_ativos():
     """API para polling: retorna alertas ativos e config.
     Executa resolução por tempo no máximo a cada 60s para evitar commits em cada poll.
@@ -122,6 +125,7 @@ def api_ativos():
 
 
 @bp_alertas.route('/dashboard')
+@permission_required_or_admin('alertas.ver')
 def dashboard():
     """Dashboard de alertas (estilo lista de mensagens)"""
     _resolver_alertas_por_tempo()
@@ -140,6 +144,7 @@ def dashboard():
 
 
 @bp_alertas.route('/config', methods=['GET', 'POST'])
+@permission_required_or_admin('alertas.config')
 def config():
     """Lista de configurações de alerta (modelo único)"""
     if request.method == 'POST' and 'resolver_apos_minutos' in request.form:
@@ -271,15 +276,30 @@ def _colunas_para_form():
 
 
 def _extrair_condicoes_from_form():
-    """Extrai condições do form (condicao_i_coluna/operador/valor/conector)."""
+    """Extrai condições do form (condicao_i_coluna/operador/valor/conector).
+
+    Usa índices presentes no POST (como indicadores), não só num_condicoes + range(n),
+    para não perder linhas ao remover condições do meio (ex.: restar só condicao_2_*).
+    """
     condicoes = []
-    num = int(request.form.get('num_condicoes', 0) or 0)
-    for i in range(num):
+    indices = set()
+    for key in request.form:
+        if key.startswith('condicao_') and key.endswith('_coluna'):
+            try:
+                idx = int(key.replace('condicao_', '').replace('_coluna', ''))
+                indices.add(idx)
+            except ValueError:
+                pass
+    for pos, i in enumerate(sorted(indices)):
         coluna = request.form.get(f'condicao_{i}_coluna', '').strip()
         operador = request.form.get(f'condicao_{i}_operador', '==').strip()
         valor = request.form.get(f'condicao_{i}_valor', '').strip()
         conector = (request.form.get(f'condicao_{i}_conector') or 'and').strip().lower()
         if conector not in ('and', 'or', 'if'):
+            conector = 'and'
+        # Primeira condição na ordem visual/lógica: conector sem efeito no motor; evita
+        # SOBRESCRITA errada se sobrou apenas uma linha com índice > 0 após remoções.
+        if pos == 0:
             conector = 'and'
         if coluna:
             condicoes.append({'coluna': coluna, 'operador': operador, 'valor': valor, 'conector': conector})
@@ -315,7 +335,58 @@ def _extrair_configuracoes_from_form():
     return configuracoes
 
 
+def _merge_config_saturacao_multi_unidade(request, configuracoes, configuracoes_previas=None):
+    """
+    Mescla campos do formulário para a regra saturacao_multi_unidade.
+    Só altera quando o bloco do formulário foi enviado (evita apagar JSON em POSTs antigos).
+    configuracoes_previas: JSON já salvo (edição), para preencher coluna/valor quando o select está em "Padrão".
+    """
+    if request.form.get('saturacao_block_sent') != '1':
+        return
+    prev = configuracoes_previas or {}
+    if request.form.get('regra_saturacao_multi_unidade') == 'on':
+        configuracoes['regra'] = 'saturacao_multi_unidade'
+        raw = (request.form.get('saturacao_unidades_texto') or '').strip()
+        configuracoes['unidades'] = [x.strip() for x in raw.replace('\n', ',').split(',') if x.strip()]
+        # Condição por linha: coluna + operador + valor (remove chaves legadas ao salvar)
+        configuracoes.pop('coluna_status', None)
+        configuracoes.pop('valor_status', None)
+        col = request.form.get('saturacao_coluna', '').strip()
+        if not col:
+            col = (prev.get('coluna') or prev.get('coluna_status') or '').strip()
+        if col:
+            configuracoes['coluna'] = col
+        else:
+            configuracoes.pop('coluna', None)
+        op = (request.form.get('saturacao_operador', '') or '==').strip() or '=='
+        configuracoes['operador'] = op
+        val_raw = request.form.get('saturacao_valor', '')
+        if op in ('is null', 'is not null'):
+            configuracoes.pop('valor', None)
+        else:
+            v = (val_raw or '').strip()
+            if not v:
+                if prev.get('valor') is not None and str(prev.get('valor')).strip() != '':
+                    v = str(prev.get('valor')).strip()
+                elif prev.get('valor_status') is not None and str(prev.get('valor_status')).strip() != '':
+                    v = str(prev.get('valor_status')).strip()
+            configuracoes['valor'] = v
+        configuracoes['coluna_unidade'] = 'Unidade'
+        msg = request.form.get('saturacao_mensagem_alerta', '').strip()
+        if msg:
+            configuracoes['mensagem_alerta'] = msg
+        else:
+            configuracoes.pop('mensagem_alerta', None)
+    else:
+        for k in (
+            'regra', 'unidades', 'coluna', 'operador', 'valor',
+            'coluna_status', 'valor_status', 'coluna_unidade', 'mensagem_alerta',
+        ):
+            configuracoes.pop(k, None)
+
+
 @bp_alertas.route('/config/create', methods=['GET', 'POST'])
+@permission_required_or_admin('alertas.config')
 def create():
     """Criar nova configuração de alerta (formulário único)."""
     colunas = _colunas_para_form()
@@ -380,6 +451,7 @@ def create():
                 coluna_ocorrencia = request.form.get('coluna_ocorrencia', '').strip()
                 if coluna_ocorrencia:
                     configuracoes['coluna_ocorrencia'] = coluna_ocorrencia
+            _merge_config_saturacao_multi_unidade(request, configuracoes)
             sumir_quando_resolvido = request.form.get('sumir_quando_resolvido') == 'on'
             config = ConfiguracaoAlerta(
                 nome=tipo,  # Usa tipo como nome
@@ -409,6 +481,7 @@ def create():
 
 
 @bp_alertas.route('/config/edit/<int:id>', methods=['GET', 'POST'])
+@permission_required_or_admin('alertas.config')
 def edit(id):
     """Editar configuração de alerta."""
     config = ConfiguracaoAlerta.query.get_or_404(id)
@@ -477,6 +550,7 @@ def edit(id):
                 coluna_ocorrencia = request.form.get('coluna_ocorrencia', '').strip()
                 if coluna_ocorrencia:
                     configuracoes['coluna_ocorrencia'] = coluna_ocorrencia
+            _merge_config_saturacao_multi_unidade(request, configuracoes, configuracoes_previas=config.get_configuracoes_dict())
             config.configuracoes = json.dumps(configuracoes)
             db.session.commit()
             flash('Configuração de alerta atualizada com sucesso!', 'success')
@@ -490,6 +564,7 @@ def edit(id):
 
 
 @bp_alertas.route('/config/duplicate/<int:id>', methods=['POST'])
+@permission_required_or_admin('alertas.config')
 def duplicate(id):
     """Duplicar configuração de alerta. Nome: copy - [nome original]."""
     config = ConfiguracaoAlerta.query.get_or_404(id)
@@ -521,6 +596,7 @@ def duplicate(id):
 
 
 @bp_alertas.route('/config/delete/<int:id>', methods=['POST'])
+@permission_required_or_admin('alertas.config')
 def delete(id):
     """Deletar configuração de alerta. Alertas já gerados mantêm nome_tipo/icone_tipo/cor_tipo."""
     config = ConfiguracaoAlerta.query.get_or_404(id)
@@ -536,6 +612,7 @@ def delete(id):
 
 
 @bp_alertas.route('/manual/create', methods=['GET', 'POST'])
+@permission_required_or_admin('alertas.ver')
 def manual_create():
     """Criar alerta manual. Sempre tipo Manual, com escolha de ícone e cor."""
     if request.method == 'POST':
@@ -589,6 +666,7 @@ def manual_create():
 
 
 @bp_alertas.route('/resolver/<int:id>', methods=['POST'])
+@permission_required_or_admin('alertas.ver')
 def resolver(id):
     """Resolver um alerta. Retorna JSON se for requisição AJAX (evita reload da página)."""
     alerta = Alerta.query.get_or_404(id)
@@ -622,6 +700,7 @@ def resolver(id):
 
 
 @bp_alertas.route('/arquivar/<int:id>', methods=['POST'])
+@permission_required_or_admin('alertas.ver')
 def arquivar(id):
     """Arquivar um alerta"""
     alerta = Alerta.query.get_or_404(id)
@@ -642,10 +721,14 @@ def arquivar(id):
         db.session.rollback()
         flash(f'Erro ao arquivar alerta: {str(e)}', 'danger')
     
+    next_url = request.form.get('next') or request.args.get('next')
+    if next_url:
+        return redirect(next_url)
     return redirect(url_for('alertas.dashboard'))
 
 
 @bp_alertas.route('/gerar', methods=['POST'])
+@permission_required_or_admin('alertas.ver')
 def gerar():
     """Gerar alertas automaticamente"""
     try:
@@ -662,6 +745,7 @@ def gerar():
 
 
 @bp_alertas.route('/log')
+@permission_required_or_admin('alertas.ver')
 def log():
     """Página de log completo de alertas com filtros e análises"""
     pagina = request.args.get('page', 1, type=int)
@@ -715,7 +799,108 @@ def log():
     )
 
 
+def _query_log_alertas(status_filtro: str, tipo_filtro: str, search: str, dias: int):
+    """Monta query base do log conforme os mesmos filtros da UI."""
+    from datetime import timedelta
+    data_limite = datetime.utcnow() - timedelta(days=dias)
+
+    query = Alerta.query.filter(Alerta.criado_em >= data_limite)
+
+    if status_filtro and status_filtro != 'todos':
+        query = query.filter_by(status=status_filtro)
+
+    if tipo_filtro:
+        query = query.filter_by(configuracao_alerta_id=tipo_filtro)
+
+    if search:
+        query = query.filter(
+            db.or_(
+                Alerta.titulo.ilike(f'%{search}%'),
+                Alerta.mensagem.ilike(f'%{search}%'),
+                Alerta.detalhes.ilike(f'%{search}%')
+            )
+        )
+
+    return query
+
+
+@bp_alertas.route('/log/resolver-todos', methods=['POST'])
+@permission_required_or_admin('alertas.ver')
+def log_resolver_todos():
+    """Resolve todos os alertas ATIVOS conforme os filtros atuais do log."""
+    status_filtro = request.form.get('status') or request.args.get('status', 'todos')
+    tipo_filtro = request.form.get('tipo') or request.args.get('tipo', '')
+    search = (request.form.get('search') or request.args.get('search', '') or '').strip()
+    dias = request.form.get('dias') or request.args.get('dias', 30, type=int)
+    try:
+        dias = int(dias)
+    except Exception:
+        dias = 30
+
+    query = _query_log_alertas(status_filtro, tipo_filtro, search, dias).filter_by(status='ativo')
+
+    try:
+        agora = datetime.utcnow()
+        qtd = query.update(
+            {
+                'status': 'resolvido',
+                'resolvido_em': agora,
+                'resolvido_por': 'Sistema',  # TODO: usar usuário logado
+            },
+            synchronize_session=False
+        )
+        db.session.commit()
+        flash(f'{qtd} alerta(s) resolvido(s).', 'success')
+    except Exception as e:
+        logger.error("Erro ao resolver todos no log: %s", e, exc_info=True)
+        db.session.rollback()
+        flash(f'Erro ao resolver todos: {str(e)}', 'danger')
+
+    next_url = request.form.get('next') or request.args.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect(url_for('alertas.log', status=status_filtro, tipo=tipo_filtro, search=search, dias=dias))
+
+
+@bp_alertas.route('/log/arquivar-todos', methods=['POST'])
+@permission_required_or_admin('alertas.ver')
+def log_arquivar_todos():
+    """Arquiva todos os alertas (exceto já arquivados) conforme os filtros atuais do log."""
+    status_filtro = request.form.get('status') or request.args.get('status', 'todos')
+    tipo_filtro = request.form.get('tipo') or request.args.get('tipo', '')
+    search = (request.form.get('search') or request.args.get('search', '') or '').strip()
+    dias = request.form.get('dias') or request.args.get('dias', 30, type=int)
+    try:
+        dias = int(dias)
+    except Exception:
+        dias = 30
+
+    query = _query_log_alertas(status_filtro, tipo_filtro, search, dias).filter(Alerta.status != 'arquivado')
+
+    try:
+        agora = datetime.utcnow()
+        qtd = query.update(
+            {
+                'status': 'arquivado',
+                'arquivado_em': agora,
+            },
+            synchronize_session=False
+        )
+        db.session.commit()
+        flash(f'{qtd} alerta(s) arquivado(s).', 'success')
+    except Exception as e:
+        logger.error("Erro ao arquivar todos no log: %s", e, exc_info=True)
+        db.session.rollback()
+        flash(f'Erro ao arquivar todos: {str(e)}', 'danger')
+
+    next_url = request.form.get('next') or request.args.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect(url_for('alertas.log', status=status_filtro, tipo=tipo_filtro, search=search, dias=dias))
+
+
 @bp_alertas.route('/log/exportar')
+@permission_required_or_admin('alertas.config')
 def log_exportar():
     """Exporta log de alertas em CSV"""
     import csv
@@ -774,6 +959,7 @@ def log_exportar():
 
 
 @bp_alertas.route('/log/api/estatisticas')
+@permission_required_or_admin('alertas.ver')
 def log_api_estatisticas():
     """API JSON com estatísticas de alertas"""
     dias = request.args.get('dias', 30, type=int)

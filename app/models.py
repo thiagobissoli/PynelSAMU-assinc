@@ -3,6 +3,7 @@
 from app import db
 from datetime import datetime
 import json
+from flask_login import UserMixin
 
 
 def _fmt_sp(dt):
@@ -26,6 +27,76 @@ dashboard_configuracao_alerta = db.Table('dashboard_configuracao_alerta',
     db.Column('dashboard_id', db.Integer, db.ForeignKey('dashboard.id'), primary_key=True),
     db.Column('configuracao_alerta_id', db.Integer, db.ForeignKey('configuracao_alerta.id'), primary_key=True)
 )
+
+# Perfil (Role) ↔ Permissão: perfis de acesso configuráveis
+role_permission = db.Table('role_permission',
+    db.Column('role_id', db.Integer, db.ForeignKey('role.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('permission_id', db.Integer, db.ForeignKey('permission.id', ondelete='CASCADE'), primary_key=True)
+)
+
+
+class Permission(db.Model):
+    """Permissão configurável (ex: download.ver, indicadores.editar, admin)."""
+    __tablename__ = 'permission'
+    id = db.Column(db.Integer, primary_key=True)
+    codigo = db.Column(db.String(80), unique=True, nullable=False)  # ex: admin, download.ver, usuarios.criar
+    nome = db.Column(db.String(120), nullable=False)
+    descricao = db.Column(db.String(255), nullable=True)
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Permission {self.codigo}>'
+
+
+class Role(db.Model):
+    """Perfil de acesso (ex: Administrador, Operador)."""
+    __tablename__ = 'role'
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    descricao = db.Column(db.String(255), nullable=True)
+    permissions = db.relationship('Permission', secondary=role_permission, backref=db.backref('roles', lazy='dynamic'), lazy='select')
+    users = db.relationship('User', backref='role', lazy=True)
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Role {self.nome}>'
+
+    def tem_permissao(self, codigo):
+        return any(p.codigo == codigo for p in self.permissions)
+
+
+class User(UserMixin, db.Model):
+    """Usuário do sistema. Campos obrigatórios: usuário, nome completo, CPF, CRM."""
+    __tablename__ = 'user'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    nome_completo = db.Column(db.String(200), nullable=False)
+    cpf = db.Column(db.String(14), unique=True, nullable=False)  # armazenado sem formatação para comparação
+    crm = db.Column(db.String(50), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role_id = db.Column(db.Integer, db.ForeignKey('role.id'), nullable=False)
+    ativo = db.Column(db.Boolean, default=True)
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    atualizado_em = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+    def tem_permissao(self, codigo):
+        if not self.ativo or not self.role:
+            return False
+        return self.role.tem_permissao(codigo)
+
+    def is_admin(self):
+        return self.tem_permissao('admin')
+
+    @property
+    def cpf_formatado(self):
+        """CPF formatado para exibição (000.000.000-00)."""
+        if not self.cpf or len(self.cpf) != 11:
+            return self.cpf or ''
+        return f'{self.cpf[:3]}.{self.cpf[3:6]}.{self.cpf[6:9]}-{self.cpf[9:]}'
+
 
 class ConfiguracaoDownload(db.Model):
     """Modelo para configuração de download automático"""
@@ -210,6 +281,11 @@ class Indicador(db.Model):
     grafico_meta_valor = db.Column(db.Float, nullable=True)
     grafico_meta_cor = db.Column(db.String(20), default='#ffc107')
     grafico_meta_estilo = db.Column(db.String(20), default='dashed')  # solid, dashed, dotted, long_dash, dash_dot
+    # Regra/cor por meta: permite definir o que é "dentro da meta" e cores acima/abaixo
+    # Operador: "<=" significa "bom quando <= meta"; ">=" significa "bom quando >= meta"
+    grafico_meta_operador = db.Column(db.String(10), default='<=', nullable=True)
+    grafico_meta_cor_abaixo = db.Column(db.String(20), default='#34c759')  # abaixo da meta
+    grafico_meta_cor_acima = db.Column(db.String(20), default='#ff3b30')  # acima da meta
     
     # Configuração de tendência
     # tendencia_inversa = True significa que MENOR é melhor (ex: tempo de resposta)
@@ -258,6 +334,9 @@ class Indicador(db.Model):
             'grafico_meta_valor': self.grafico_meta_valor,
             'grafico_meta_cor': self.grafico_meta_cor or '#ffc107',
             'grafico_meta_estilo': self.grafico_meta_estilo or 'dashed',
+            'grafico_meta_operador': (self.grafico_meta_operador or '<='),
+            'grafico_meta_cor_abaixo': self.grafico_meta_cor_abaixo or '#34c759',
+            'grafico_meta_cor_acima': self.grafico_meta_cor_acima or '#ff3b30',
             'tendencia_inversa': self.tendencia_inversa,
             'cor_subida': self.cor_subida or '#28a745',
             'cor_descida': self.cor_descida or '#dc3545',

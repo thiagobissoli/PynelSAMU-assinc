@@ -3,12 +3,61 @@
  * Gera tons via Web Audio API (sem arquivos de áudio externos).
  */
 window.AlertaSom = (function () {
+    var _ctx = null;
+    var _unlockBound = false;
+
+    function _getCtx() {
+        if (_ctx) return _ctx;
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        try {
+            _ctx = new Ctx();
+            return _ctx;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function _resumeCtx() {
+        var ctx = _getCtx();
+        if (!ctx) return;
+        // Em alguns navegadores o contexto inicia "suspended" até gesto do usuário.
+        try {
+            if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                ctx.resume().catch(function () {});
+            }
+        } catch (e) {}
+    }
+
+    // Bind uma única vez: desbloqueia áudio no primeiro gesto do usuário.
+    function bindAutoUnlock() {
+        if (_unlockBound) return;
+        _unlockBound = true;
+        var unlock = function () {
+            _resumeCtx();
+            // remove após primeiro unlock para não ficar em loop de handlers
+            try {
+                document.removeEventListener('pointerdown', unlock, true);
+                document.removeEventListener('touchstart', unlock, true);
+                document.removeEventListener('mousedown', unlock, true);
+                document.removeEventListener('keydown', unlock, true);
+            } catch (e) {}
+        };
+        try {
+            document.addEventListener('pointerdown', unlock, true);
+            document.addEventListener('touchstart', unlock, true);
+            document.addEventListener('mousedown', unlock, true);
+            document.addEventListener('keydown', unlock, true);
+        } catch (e) {}
+    }
+
     function playSom(id) {
         if (!id || id === 'none') return;
         try {
-            var Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            var ctx = new Ctx();
+            bindAutoUnlock();
+            var ctx = _getCtx();
+            if (!ctx) return;
+            _resumeCtx();
             function beep(freq, start, dur) {
                 var o = ctx.createOscillator();
                 var g = ctx.createGain();
@@ -28,5 +77,5 @@ window.AlertaSom = (function () {
             else beep(800, 0, 0.25);
         } catch (e) { /* AudioContext not available */ }
     }
-    return { playSom: playSom };
+    return { playSom: playSom, bindAutoUnlock: bindAutoUnlock };
 })();

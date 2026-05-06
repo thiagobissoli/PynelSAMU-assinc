@@ -103,6 +103,24 @@ function formatTickHora(ms) {
     const d = new Date(ms);
     return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 }
+function buildHourlyTicksWithLast(xMin, xMax) {
+    const MS_H = 3600000;
+    const out = [];
+    const d = new Date(xMin);
+    d.setMinutes(0, 0, 0);
+    d.setSeconds(0, 0);
+    d.setMilliseconds(0);
+    let cur = d.getTime();
+    if (cur < xMin) cur += MS_H;
+    while (cur <= xMax) {
+        out.push(cur);
+        cur += MS_H;
+    }
+    if (out.length === 0 || out[out.length - 1] !== xMax) {
+        out.push(xMax);
+    }
+    return out;
+}
 
 // Carregar gráficos para todos os indicadores com gráfico habilitado
 {% for resultado in resultados %}
@@ -195,9 +213,13 @@ function formatTickHora(ms) {
                                     type: 'linear',
                                     min: xMin,
                                     max: xMax,
+                                    afterBuildTicks: function(scale) {
+                                        const ticks = buildHourlyTicksWithLast(scale.min, scale.max);
+                                        scale.ticks = ticks.map(function(v) { return { value: v }; });
+                                    },
                                     ticks: {
                                         callback: function(v) { return formatTickHora(v); },
-                                        maxTicksLimit: 8
+                                        autoSkip: false
                                     }
                                 },
                                 y: {

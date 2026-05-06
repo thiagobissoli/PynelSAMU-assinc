@@ -569,6 +569,25 @@ function formatTickHora(ms) {
     const d = new Date(ms);
     return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 }
+/** Grade vertical a cada 1h (marcas cheias); última marca = horário exato do último registro (xMax). */
+function buildHourlyTicksWithLast(xMin, xMax) {
+    const MS_H = 3600000;
+    const out = [];
+    const d = new Date(xMin);
+    d.setMinutes(0, 0, 0);
+    d.setSeconds(0, 0);
+    d.setMilliseconds(0);
+    let cur = d.getTime();
+    if (cur < xMin) cur += MS_H;
+    while (cur <= xMax) {
+        out.push(cur);
+        cur += MS_H;
+    }
+    if (out.length === 0 || out[out.length - 1] !== xMax) {
+        out.push(xMax);
+    }
+    return out;
+}
 
 function renderizarChart(canvasId, indicadorId, data) {
     const ctx = document.getElementById(canvasId);
@@ -596,7 +615,29 @@ function renderizarChart(canvasId, indicadorId, data) {
     const xMax = Math.max(...timestampsMs.filter(t => !isNaN(t)));
     
     const unidade = ind?.unidade || '';
-    const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+
+    // Cor por META (quando habilitada): verde dentro da meta, vermelho fora.
+    // Usa operador <= ou >= para determinar o que é "dentro".
+    let cor = (tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva));
+    try {
+        const metaVal = (data && Array.isArray(data.meta) && data.meta.length) ? data.meta[0] : null;
+        const metaOp = (data && data.meta_operador) ? String(data.meta_operador) : (ind?.grafico_meta_operador || '<=');
+        const corAbaixo = (data && data.meta_cor_abaixo) ? data.meta_cor_abaixo : (ind?.grafico_meta_cor_abaixo || '#34c759');
+        const corAcima = (data && data.meta_cor_acima) ? data.meta_cor_acima : (ind?.grafico_meta_cor_acima || '#ff3b30');
+        if (metaVal !== null && metaVal !== undefined) {
+            // valor "atual" do gráfico = último ponto não-nulo
+            let last = null;
+            for (let i = dados.length - 1; i >= 0; i--) {
+                const v = dados[i]?.valor;
+                if (v !== null && v !== undefined) { last = v; break; }
+            }
+            if (last !== null) {
+                const dentro = (metaOp === '>=') ? (Number(last) >= Number(metaVal)) : (Number(last) <= Number(metaVal));
+                // Dentro da meta: usa a cor do lado que representa "bom" (por padrão: <= => abaixo bom; >= => acima bom)
+                cor = dentro ? (metaOp === '>=' ? corAcima : corAbaixo) : (metaOp === '>=' ? corAbaixo : corAcima);
+            }
+        }
+    } catch (e) {}
     const corHex = cor.startsWith('#') ? cor : '#' + cor;
     const corArea20 = corHex + opacidadeHex;
     const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 150);
@@ -693,11 +734,15 @@ function renderizarChart(canvasId, indicadorId, data) {
                     max: xMax,
                     display: true,
                     grid: { color: gridColor, drawBorder: false },
+                    afterBuildTicks: function(scale) {
+                        const ticks = buildHourlyTicksWithLast(scale.min, scale.max);
+                        scale.ticks = ticks.map(function(v) { return { value: v }; });
+                    },
                     ticks: {
                         color: textColor,
                         font: { size: 10 },
                         maxRotation: 0,
-                        maxTicksLimit: 8,
+                        autoSkip: false,
                         callback: function(v) { return formatTickHora(v); }
                     }
                 },

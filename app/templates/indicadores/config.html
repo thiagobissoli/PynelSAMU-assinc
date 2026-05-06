@@ -6,12 +6,14 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1><i class="bi bi-sliders"></i> Configuração de Indicadores</h1>
     <div>
-        <a href="{{ url_for('download.index') }}" class="btn btn-secondary">
+        <a href="{{ url_for('main.index') }}" class="btn btn-secondary">
             <i class="bi bi-arrow-left"></i> Voltar
         </a>
+        {% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}
         <a href="{{ url_for('indicadores.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-circle"></i> Novo Indicador
         </a>
+        {% endif %}
         <a href="{{ url_for('indicadores.painel') }}" class="btn btn-success">
             <i class="bi bi-speedometer2"></i> Ver Painel
         </a>
@@ -42,9 +44,11 @@
                 <tbody>
                     {% for indicador in indicadores %}
                     <tr>
-                        <td class="ordem-cell" data-id="{{ indicador.id }}" data-ordem="{{ indicador.ordem }}" style="cursor: pointer;" title="Clique para editar">
+                        <td class="{% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}ordem-cell{% endif %}" data-id="{{ indicador.id }}" data-ordem="{{ indicador.ordem }}" {% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}style="cursor: pointer;" title="Clique para editar"{% endif %}>
                             <span class="ordem-valor">{{ indicador.ordem }}</span>
+                            {% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}
                             <input type="number" class="form-control form-control-sm ordem-input" value="{{ indicador.ordem }}" min="0" style="display: none; width: 70px;">
+                            {% endif %}
                         </td>
                         <td>
                             <strong>{{ indicador.nome }}</strong>
@@ -105,11 +109,14 @@
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
+                                {% if current_user.is_admin() or current_user.tem_permissao('indicadores.ver') %}
                                 <a href="{{ url_for('indicadores.calcular', id=indicador.id) }}" 
                                    class="btn btn-outline-info" 
                                    title="Calcular">
                                     <i class="bi bi-calculator"></i>
                                 </a>
+                                {% endif %}
+                                {% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}
                                 <a href="{{ url_for('indicadores.duplicate', id=indicador.id) }}" 
                                    class="btn btn-outline-secondary" 
                                    title="Duplicar">
@@ -127,6 +134,7 @@
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
@@ -138,8 +146,10 @@
 </div>
 {% else %}
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> Nenhum indicador configurado ainda. 
+    <i class="bi bi-info-circle"></i> Nenhum indicador configurado ainda.
+    {% if current_user.is_admin() or current_user.tem_permissao('indicadores.editar') %}
     <a href="{{ url_for('indicadores.create') }}">Criar primeiro indicador</a>
+    {% endif %}
 </div>
 {% endif %}
 

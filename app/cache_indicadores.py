@@ -113,6 +113,9 @@ def get_or_calc_indicadores(dashboard, mode):
             resultado["grafico_meta_habilitado"] = indicador.grafico_meta_habilitado
             resultado["grafico_meta_cor"] = indicador.grafico_meta_cor or "#ffc107"
             resultado["grafico_meta_estilo"] = indicador.grafico_meta_estilo or "dashed"
+            resultado["grafico_meta_operador"] = (getattr(indicador, "grafico_meta_operador", None) or "<=")
+            resultado["grafico_meta_cor_abaixo"] = (getattr(indicador, "grafico_meta_cor_abaixo", None) or "#34c759")
+            resultado["grafico_meta_cor_acima"] = (getattr(indicador, "grafico_meta_cor_acima", None) or "#ff3b30")
         
         return resultado
     
@@ -196,6 +199,9 @@ def _build_grafico_resp(indicador, dados):
             resp['meta'] = [float(indicador.grafico_meta_valor)] * len(dados)
             resp['meta_cor'] = indicador.grafico_meta_cor or '#ffc107'
             resp['meta_estilo'] = indicador.grafico_meta_estilo or 'dashed'
+            resp['meta_operador'] = (getattr(indicador, 'grafico_meta_operador', None) or '<=')
+            resp['meta_cor_abaixo'] = (getattr(indicador, 'grafico_meta_cor_abaixo', None) or '#34c759')
+            resp['meta_cor_acima'] = (getattr(indicador, 'grafico_meta_cor_acima', None) or '#ff3b30')
     else:
         resp = dados
     

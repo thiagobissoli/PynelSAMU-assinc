@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar usuário' if modo == 'edit' else 'Novo usuário' }}{% endblock %}
+{% block content %}
+<h4><i class="bi bi-person-plus"></i> {{ 'Editar usuário' if modo == 'edit' else 'Novo usuário' }}</h4>
+<p class="text-muted">Campos obrigatórios: usuário, nome completo, CPF e CRM. Senha inicial = CPF (sem formatação).</p>
+<form method="post">
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="username" class="form-label">Usuário <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="username" name="username" required
+                   value="{{ user.username if modo == 'edit' else (username|default(request.form.get('username', ''))) }}"
+                   {{ 'readonly' if modo == 'edit' else '' }}>
+            {% if modo == 'edit' %}<small class="text-muted">Não é possível alterar o nome de usuário.</small>{% endif %}
+        </div>
+        <div class="col-md-6 mb-3">
+            <label for="nome_completo" class="form-label">Nome completo <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="nome_completo" name="nome_completo" required
+                   value="{{ user.nome_completo if modo == 'edit' else (nome_completo|default(request.form.get('nome_completo', ''))) }}">
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="cpf" class="form-label">CPF <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="cpf" name="cpf" required
+                   value="{{ user.cpf_formatado if modo == 'edit' else (cpf|default(request.form.get('cpf', ''))) }}"
+                   placeholder="000.000.000-00 ou apenas números"
+                   {{ 'readonly' if modo == 'edit' else '' }}>
+            {% if modo == 'edit' %}<small class="text-muted">CPF não pode ser alterado. Usado como senha no reset.</small>{% endif %}
+        </div>
+        <div class="col-md-6 mb-3">
+            <label for="crm" class="form-label">CRM <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="crm" name="crm" required
+                   value="{{ user.crm if modo == 'edit' else (crm|default(request.form.get('crm', ''))) }}">
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="role_id" class="form-label">Perfil de acesso</label>
+            <select class="form-select" id="role_id" name="role_id" required>
+                <option value="">Selecione...</option>
+                {% for r in roles %}
+                <option value="{{ r.id }}" {{ 'selected' if (modo == 'edit' and user.role_id == r.id) or (modo == 'create' and (role_id == r.id or request.form.get('role_id') == r.id|string)) else '' }}>{{ r.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if modo == 'edit' %}
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Ativo</label>
+            <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" name="ativo" value="1" {{ 'checked' if user.ativo else '' }}>
+                <label class="form-check-label">Usuário ativo</label>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    <hr>
+    <button type="submit" class="btn btn-primary">Salvar</button>
+    <a class="btn btn-secondary" href="{{ url_for('usuarios.index') }}">Cancelar</a>
+</form>
+{% endblock %}

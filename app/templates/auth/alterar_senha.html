@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Alterar senha{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <h4><i class="bi bi-key"></i> Alterar minha senha</h4>
+        <form method="post" action="{{ url_for('auth.alterar_senha') }}">
+            <div class="mb-3">
+                <label for="senha_atual" class="form-label">Senha atual</label>
+                <input type="password" class="form-control" id="senha_atual" name="senha_atual" required autocomplete="current-password">
+            </div>
+            <div class="mb-3">
+                <label for="nova_senha" class="form-label">Nova senha</label>
+                <input type="password" class="form-control" id="nova_senha" name="nova_senha" required minlength="6" autocomplete="new-password">
+                <small class="text-muted">Mínimo 6 caracteres.</small>
+            </div>
+            <div class="mb-3">
+                <label for="confirmar_senha" class="form-label">Confirmar nova senha</label>
+                <input type="password" class="form-control" id="confirmar_senha" name="confirmar_senha" required minlength="6" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-primary">Alterar senha</button>
+            <a class="btn btn-secondary" href="{{ url_for('main.index') }}">Cancelar</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

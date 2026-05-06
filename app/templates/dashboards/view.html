@@ -455,10 +455,18 @@
             font-size: calc(1.35rem * var(--alerta-scale));
         }
         #painelAlertas .list-group-item {
-            color: var(--text-primary);
+            color: #fff !important;
             font-size: calc(1rem * var(--alerta-scale));
             min-height: 56px;
             padding: 12px 16px;
+        }
+        #painelAlertas .painel-alerta-item,
+        #painelAlertas .painel-alerta-item h5.alerta-titulo,
+        #painelAlertas .painel-alerta-item p,
+        #painelAlertas .painel-alerta-item small,
+        #painelAlertas .painel-alerta-item .alerta-datetime,
+        #painelAlertas .painel-alerta-item .alerta-metadata {
+            color: #fff !important;
         }
         #painelAlertas .painel-alerta-item h5.alerta-titulo {
             font-size: calc(1.2rem * var(--alerta-scale));
@@ -475,14 +483,14 @@
         }
         #painelAlertas .painel-alerta-item .alerta-metadata {
             font-size: calc(0.75rem * var(--alerta-scale));
-            opacity: 0.9;
+            opacity: 1;
         }
         #painelAlertas .painel-alerta-item .alerta-metadata .bi {
             font-size: calc(0.75rem * var(--alerta-scale)) !important;
         }
         #painelAlertas .painel-alerta-item .alerta-datetime {
             font-size: calc(0.75rem * var(--alerta-scale));
-            opacity: 0.9;
+            opacity: 1;
         }
     </style>
 </head>
@@ -568,9 +576,11 @@
                         <button type="button" class="btn btn-outline-secondary" id="alertaFontMenos" title="Diminuir fonte (A-)">A−</button>
                         <button type="button" class="btn btn-outline-secondary" id="alertaFontMais" title="Aumentar fonte (A+)">A+</button>
                     </div>
+                    {% if current_user.is_admin() or current_user.tem_permissao('alertas.ver') %}
                     <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAlertaManual">
                         <i class="bi bi-plus-circle"></i> Alerta Manual
                     </button>
+                    {% endif %}
                 </div>
             </div>
             <div class="list-group flex-grow-1 overflow-auto" id="listaAlertas"
@@ -588,7 +598,7 @@
                                    style="color: {{ alerta.cor_tipo or '#ff3b30' }}; font-size: 1.5rem;"></i>
                                 <div>
                                     <h5 class="mb-0 fw-bold alerta-titulo">{{ alerta.titulo.split(' - ')[0] if ' - ' in alerta.titulo else alerta.titulo }}</h5>
-                                    <small class="alerta-datetime text-secondary d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
+                                    <small class="alerta-datetime d-block">Criado em: {{ alerta.criado_em | horario_sao_paulo }}</small>
                                 </div>
                             </div>
                         </div>
@@ -598,16 +608,18 @@
                                 {% if alerta.detalhes %}
                                 {% set detalhes = alerta.detalhes | from_json %}
                                 {% if detalhes.numero_ocorrencia %}
-                                <small class="alerta-metadata text-secondary d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
+                                <small class="alerta-metadata d-block"><i class="bi bi-hash"></i> Ocorrência: {{ detalhes.numero_ocorrencia }}</small>
                                 {% endif %}
                                 {% endif %}
                             </div>
+                            {% if current_user.is_admin() or current_user.tem_permissao('alertas.ver') %}
                             <form method="POST" action="{{ url_for('alertas.resolver', id=alerta.id) }}" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="{{ alerta.id }}" data-origem="{{ alerta.origem or 'automatico' }}">
                                 <input type="hidden" name="next" value="{{ url_for('dashboards.view', id=dashboard.id) }}">
                                 <button type="submit" class="btn btn-sm rounded-circle {{ 'btn-success' if alerta.nome_tipo == 'Manual' else 'btn-secondary' }}" title="{{ 'Resolver' if alerta.origem == 'manual' else 'Alerta automático - só some pelas configurações' }}">
                                     <span class="fw-bold">{{ 'M' if alerta.nome_tipo == 'Manual' else 'A' }}</span>
                                 </button>
                             </form>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -620,16 +632,19 @@
             </div>
         </div>
         
-        <!-- Modal Alerta Manual (tema dark) -->
+        <!-- Modal Alerta Manual (tema dark) - apenas para quem tem alertas.ver -->
+        {% if current_user.is_admin() or current_user.tem_permissao('alertas.ver') %}
         <div class="modal fade" id="modalAlertaManual" tabindex="-1">
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Criar Alerta Manual</h5>
                         <div class="d-flex align-items-center gap-2">
+                            {% if current_user.is_admin() or current_user.tem_permissao('dashboards.editar') %}
                             <a href="{{ url_for('dashboards.alertas_manual', id=dashboard.id) }}" class="btn btn-sm btn-outline-primary" title="Abrir página para gerenciar alertas" target="_blank" rel="noopener noreferrer">
                                 <i class="bi bi-globe"></i>
                             </a>
+                            {% endif %}
                             <button type="button" class="btn-close {% if dashboard.cor_tema == 'dark' %}btn-close-white{% endif %}" data-bs-dismiss="modal" aria-label="Fechar"></button>
                         </div>
                     </div>
@@ -691,6 +706,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
         {% elif indicadores %}
         <div id="indicadorDetalhes">
             {% for indicador in indicadores %}
@@ -810,6 +826,24 @@ function parseTimestamp(s) {
 function formatTickHora(ms) {
     const d = new Date(ms);
     return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+}
+function buildHourlyTicksWithLast(xMin, xMax) {
+    const MS_H = 3600000;
+    const out = [];
+    const d = new Date(xMin);
+    d.setMinutes(0, 0, 0);
+    d.setSeconds(0, 0);
+    d.setMilliseconds(0);
+    let cur = d.getTime();
+    if (cur < xMin) cur += MS_H;
+    while (cur <= xMax) {
+        out.push(cur);
+        cur += MS_H;
+    }
+    if (out.length === 0 || out[out.length - 1] !== xMax) {
+        out.push(xMax);
+    }
+    return out;
 }
 
 // Cores do tema
@@ -966,8 +1000,27 @@ function renderizarGraficoPrincipal(id, data) {
     const xMin = Math.min(...timestampsMs.filter(t => !isNaN(t)));
     const xMax = Math.max(...timestampsMs.filter(t => !isNaN(t)));
     
-    // Cor da linha = mesma cor da % de tendência (usa tendência do backend, não do gráfico)
-    const cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+    // Cor da linha:
+    // - padrão: mesma cor da tendência (backend)
+    // - se meta estiver habilitada: verde dentro da meta, vermelho fora (com base em operador + cores acima/abaixo)
+    let cor = tendencia === 'positiva' ? corPositiva : (tendencia === 'negativa' ? corNegativa : corPositiva);
+    try {
+        const metaVal = (data && Array.isArray(data.meta) && data.meta.length) ? data.meta[0] : null;
+        const metaOp = (data && data.meta_operador) ? String(data.meta_operador) : (indicador?.grafico_meta_operador || '<=');
+        const corAbaixo = (data && data.meta_cor_abaixo) ? data.meta_cor_abaixo : (indicador?.grafico_meta_cor_abaixo || COLORS.green);
+        const corAcima = (data && data.meta_cor_acima) ? data.meta_cor_acima : (indicador?.grafico_meta_cor_acima || COLORS.red);
+        if (metaVal !== null && metaVal !== undefined) {
+            let last = null;
+            for (let i = dados.length - 1; i >= 0; i--) {
+                const v = dados[i]?.valor;
+                if (v !== null && v !== undefined) { last = v; break; }
+            }
+            if (last !== null) {
+                const dentro = (metaOp === '>=') ? (Number(last) >= Number(metaVal)) : (Number(last) <= Number(metaVal));
+                cor = dentro ? (metaOp === '>=' ? corAcima : corAbaixo) : (metaOp === '>=' ? corAbaixo : corAcima);
+            }
+        }
+    } catch (e) {}
     
     // Área sob a linha: opacidade configurável no dashboard
     const corHex = cor.startsWith('#') ? cor : '#' + cor;
@@ -1068,11 +1121,15 @@ function renderizarGraficoPrincipal(id, data) {
                         color: COLORS.gridColor,
                         drawBorder: false
                     },
+                    afterBuildTicks: function(scale) {
+                        const ticks = buildHourlyTicksWithLast(scale.min, scale.max);
+                        scale.ticks = ticks.map(function(v) { return { value: v }; });
+                    },
                     ticks: {
                         color: COLORS.textColor,
                         font: { size: 11 },
                         maxRotation: 0,
-                        maxTicksLimit: 8,
+                        autoSkip: false,
                         callback: function(v) { return formatTickHora(v); }
                     }
                 },
@@ -1236,7 +1293,7 @@ document.addEventListener('submit', function(e) {
                     '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
                     '<i class="bi bi-' + (a.tipo_alerta_icone || 'megaphone') + ' me-2 flex-shrink-0" style="color:' + cor + '; font-size: 1.5rem;"></i>' +
                     '<div><h5 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h5>' +
-                    '<small class="alerta-datetime text-secondary d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                    '<small class="alerta-datetime d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
                     '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center"><div style="font-size: 1rem;">' +
                     '<p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
                     '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual">' +
@@ -1300,7 +1357,7 @@ if (formAlerta) {
                         '<div class="row g-2 align-items-start"><div class="col-12 col-md-4"><div class="d-flex align-items-center">' +
                         '<i class="bi bi-' + (a.tipo_alerta_icone || 'megaphone') + ' me-2 flex-shrink-0" style="color:' + cor + '; font-size: 1.5rem;"></i>' +
                         '<div><h5 class="mb-0 fw-bold alerta-titulo">' + (tituloExib || a.titulo || '') + '</h5>' +
-                        '<small class="alerta-datetime text-secondary d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
+                        '<small class="alerta-datetime d-block">Criado em: ' + (a.criado_em || '') + '</small></div></div></div>' +
                         '<div class="col-12 col-md-8 d-flex justify-content-between align-items-center"><div style="font-size: 1rem;">' +
                         '<p class="mb-1">' + (a.mensagem || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>' +
                         '<form method="POST" action="' + resolverUrl + '" class="ms-2 flex-shrink-0 form-resolver-alerta" data-alerta-id="' + a.id + '" data-origem="manual">' +
